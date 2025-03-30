@@ -106,7 +106,7 @@
 
 ---
 
-## 🧱 C4 Model Diagrams (PlantUML)
+## 🧱 C4 Model Diagrams
 
 ### Level 1: Context Diagram  
 ![context_diagram](context_diagram.png)
