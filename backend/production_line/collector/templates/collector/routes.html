@@ -1,0 +1,624 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Production Line Monitoring - Service Routes</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css">
+    <style>
+        #map { 
+            height: 500px; 
+            width: 100%;
+        }
+        .status-operational { background-color: #28a745; }
+        .status-warning { background-color: #ffc107; }
+        .status-critical { background-color: #dc3545; }
+        .status-offline { background-color: #6c757d; }
+        .status-maintenance { background-color: #17a2b8; }
+        .route-card { margin-bottom: 20px; }
+        .delegation-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 1em;
+        }
+        .route-info-panel {
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .stop-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .stop-item {
+            padding: 10px;
+            margin-bottom: 5px;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+        }
+        .stop-item.completed {
+            border-left-color: #28a745;
+            background-color: rgba(40, 167, 69, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">Production Line Monitoring</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'dashboard' %}">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'machine_map' %}">Map View</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{% url 'routes' %}">Routes</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/admin/">Admin</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <h1 class="display-4">Service Routes</h1>
+                <p class="lead">Plan and monitor technician service routes</p>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Route Filters</h5>
+                        <div>
+                            <button type="button" id="refresh-routes-btn" class="btn btn-light btn-sm me-2">
+                                <i class="bi bi-arrow-clockwise"></i> Refresh Routes
+                            </button>
+                            <button type="button" class="btn btn-light btn-sm" data-bs-toggle="modal" data-bs-target="#createRouteModal">
+                                Create Optimized Route
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form method="get" class="row g-3">
+                            <div class="col-md-4">
+                                <label for="technician" class="form-label">Technician</label>
+                                <select name="technician" id="technician" class="form-select">
+                                    <option value="">All Technicians</option>
+                                    {% for tech in technicians %}
+                                    <option value="{{ tech.id }}" {% if request.GET.technician == tech.id|stringformat:"i" %}selected{% endif %}>
+                                        {% if tech.first_name %}{{ tech.first_name }} {{ tech.last_name }}{% else %}{{ tech.username }}{% endif %}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="date" class="form-label">Date</label>
+                                <input type="date" name="date" id="date" class="form-control" value="{{ request.GET.date|default:'' }}">
+                            </div>
+                            <div class="col-md-4 d-flex align-items-end">
+                                <button type="submit" class="btn btn-primary me-2">Filter</button>
+                                <a href="{% url 'routes' %}" class="btn btn-outline-secondary">Reset</a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-4">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h2>Routes</h2>
+                    <div id="refresh-spinner" class="spinner-border spinner-border-sm text-primary" role="status" style="display: none;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+                <div class="list-group mb-4" id="routes-list">
+                    {% for route in routes %}
+                    <a href="#" class="list-group-item list-group-item-action position-relative route-item" data-route-id="{{ route.id }}">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h5 class="mb-1">{{ route.name }}</h5>
+                            <small>{{ route.date }}</small>
+                        </div>
+                        <p class="mb-1">
+                            Technician: 
+                            {% if route.technician.first_name %}
+                                {{ route.technician.first_name }} {{ route.technician.last_name }}
+                            {% else %}
+                                {{ route.technician.username }}
+                            {% endif %}
+                        </p>
+                        <small>
+                            Status: <span class="badge bg-{% if route.status == 'planned' %}info{% elif route.status == 'in_progress' %}warning{% elif route.status == 'completed' %}success{% else %}secondary{% endif %}">
+                                {{ route.get_status_display }}
+                            </span>
+                        </small>
+                        <small>Estimated time: {{ route.estimated_duration|floatformat:1 }} hours</small>
+                        {% if route.is_delegation %}
+                            <span class="badge bg-dark delegation-badge">Business Trip</span>
+                        {% endif %}
+                    </a>
+                    {% empty %}
+                    <div class="list-group-item">
+                        No routes found with the selected filters.
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div class="col-md-8">
+                <div id="route-details-container">
+                    <div class="text-center py-5" id="route-placeholder">
+                        <h3 class="text-muted">Select a route to view details</h3>
+                        <p>Route information and map will be displayed here</p>
+                    </div>
+                    
+                    <div id="route-details" style="display:none;">
+                        <div class="route-info-panel">
+                            <h3 id="route-name"></h3>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <p>
+                                        <strong>Technician:</strong> <span id="route-technician"></span><br>
+                                        <strong>Date:</strong> <span id="route-date"></span><br>
+                                        <strong>Status:</strong> <span id="route-status"></span>
+                                    </p>
+                                </div>
+                                <div class="col-md-6">
+                                    <p>
+                                        <strong>Start Location:</strong> <span id="route-start-location"></span><br>
+                                        <strong>Estimated Duration:</strong> <span id="route-duration"></span> hours<br>
+                                        <strong>Type:</strong> <span id="route-type"></span>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="map" class="mb-4"></div>
+                        
+                        <h4>Route Stops</h4>
+                        <div class="stop-list" id="stop-list">
+                            <!-- Stops will be populated here by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for creating a new optimized route -->
+    <div class="modal fade" id="createRouteModal" tabindex="-1" aria-labelledby="createRouteModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createRouteModalLabel">Create Optimized Route</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="route-creation-error" class="alert alert-danger" style="display: none;"></div>
+                    
+                    <!-- Step 1: Route details -->
+                    <div id="step1" class="create-route-step">
+                        <h4>Step 1: Route Details</h4>
+                        <div class="mb-3">
+                            <label for="route-name" class="form-label">Route Name</label>
+                            <input type="text" class="form-control" id="route-name" placeholder="Enter route name">
+                        </div>
+                        <div class="mb-3">
+                            <label for="route-date" class="form-label">Date</label>
+                            <input type="date" class="form-control" id="route-date">
+                        </div>
+                        <div class="mb-3">
+                            <label for="route-technician" class="form-label">Technician</label>
+                            <select class="form-select" id="route-technician">
+                                <option value="">Select technician</option>
+                                {% for tech in technicians %}
+                                <option value="{{ tech.id }}">
+                                    {% if tech.first_name %}{{ tech.first_name }} {{ tech.last_name }}{% else %}{{ tech.username }}{% endif %}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button class="btn btn-primary" onclick="goToStep(2)">Next</button>
+                    </div>
+                    
+                    <!-- Step 2: Select machines -->
+                    <div id="step2" class="create-route-step" style="display: none;">
+                        <h4>Step 2: Select Machines to Service</h4>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="filter-warnings">
+                                <label class="form-check-label" for="filter-warnings">
+                                    Show only machines with active warnings
+                                </label>
+                            </div>
+                        </div>
+                        <div id="machine-selection-container" class="mb-3" style="max-height: 300px; overflow-y: auto;">
+                            <!-- Machine checkboxes will be loaded via AJAX -->
+                            <div class="text-center py-4">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p>Loading machines...</p>
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <button class="btn btn-secondary" onclick="goToStep(1)">Back</button>
+                            <button class="btn btn-primary" id="optimize-btn" onclick="optimizeRoute()">
+                                Optimize Route
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Step 3: Review optimized route -->
+                    <div id="step3" class="create-route-step" style="display: none;">
+                        <h4>Step 3: Review Optimized Route</h4>
+                        <div id="optimization-results">
+                            <!-- Results will be shown here -->
+                        </div>
+                        <div class="d-flex justify-content-between mt-3">
+                            <button class="btn btn-secondary" onclick="goToStep(2)">Back</button>
+                            <button class="btn btn-success" onclick="saveRoute()">Save Route</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            let map = null;
+            let routeMarkers = [];
+            let routePolyline = null;
+            
+            // Headquarters location (Warsaw)
+            const headquarters = {
+                name: "Headquarters",
+                lat: 52.2297,
+                lng: 21.0122,
+                address: "{{ headquarters }}"
+            };
+            
+            // Status color mapping
+            const statusColors = {
+                'operational': '#28a745',
+                'warning': '#ffc107',
+                'critical': '#dc3545',
+                'offline': '#6c757d',
+                'maintenance': '#17a2b8'
+            };
+            
+            // Handle route item clicks
+            document.querySelectorAll('.route-item').forEach(item => {
+                item.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    
+                    // Highlight selected route
+                    document.querySelectorAll('.route-item').forEach(el => {
+                        el.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                    
+                    // Get route details
+                    const routeId = this.getAttribute('data-route-id');
+                    fetchRouteDetails(routeId);
+                });
+            });
+            
+            // Fetch route details from API
+            function fetchRouteDetails(routeId) {
+                fetch(`/api/collector/routes/${routeId}/`)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        displayRouteDetails(data);
+                    })
+                    .catch(error => {
+                        console.error('Error fetching route details:', error);
+                        alert('Could not load route details');
+                    });
+            }
+            
+            // Display route details in the UI
+            function displayRouteDetails(route) {
+                // Show details panel, hide placeholder
+                document.getElementById('route-placeholder').style.display = 'none';
+                document.getElementById('route-details').style.display = 'block';
+                
+                // Populate route info
+                document.getElementById('route-name').textContent = route.name;
+                document.getElementById('route-technician').textContent = route.technician.name;
+                document.getElementById('route-date').textContent = route.date;
+                
+                const statusBadge = `<span class="badge bg-${getStatusBadgeColor(route.status)}">${getStatusDisplay(route.status)}</span>`;
+                document.getElementById('route-status').innerHTML = statusBadge;
+                
+                document.getElementById('route-start-location').textContent = route.start_location;
+                document.getElementById('route-duration').textContent = route.estimated_duration.toFixed(1);
+                
+                const routeType = route.is_delegation ? 
+                    '<span class="badge bg-dark">Business Trip</span>' : 
+                    '<span class="badge bg-success">Regular Route</span>';
+                document.getElementById('route-type').innerHTML = routeType;
+                
+                // Populate stops list
+                const stopList = document.getElementById('stop-list');
+                stopList.innerHTML = '';
+                
+                // Add stops to the list
+                route.stops.forEach(stop => {
+                    const stopItem = document.createElement('div');
+                    stopItem.className = `stop-item ${stop.completed ? 'completed' : ''}`;
+                    
+                    stopItem.innerHTML = `
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h5 class="mb-1">${stop.order}. ${stop.machine_name}</h5>
+                            <span class="badge status-${stop.status}" style="background-color: ${statusColors[stop.status]}">
+                                ${getStatusDisplay(stop.status)}
+                            </span>
+                        </div>
+                        <p class="mb-1">
+                            <strong>Model:</strong> ${stop.model}<br>
+                            <strong>Address:</strong> ${stop.address || 'No address'}<br>
+                            <strong>Service time:</strong> ${stop.service_time.toFixed(1)} hours
+                        </p>
+                        <small>
+                            ${stop.warnings_count > 0 ? `<span class="badge bg-danger">${stop.warnings_count} warnings</span>` : ''}
+                            ${stop.completed ? '<span class="badge bg-success">Completed</span>' : ''}
+                        </small>
+                    `;
+                    
+                    stopList.appendChild(stopItem);
+                });
+                
+                // Initialize or update map
+                initializeOrUpdateMap(route);
+            }
+            
+            // Initialize or update the route map
+            function initializeOrUpdateMap(route) {
+                // If map not initialized, create it
+                if (!map) {
+                    map = L.map('map').setView([headquarters.lat, headquarters.lng], 7);
+                    
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        maxZoom: 19,
+                        attribution: '© OpenStreetMap contributors'
+                    }).addTo(map);
+                }
+                
+                // Clear existing markers and polyline
+                routeMarkers.forEach(marker => map.removeLayer(marker));
+                routeMarkers = [];
+                if (routePolyline) map.removeLayer(routePolyline);
+                
+                // Add headquarters marker
+                const hqIcon = L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div style="background-color: #007bff; width: 24px; height: 24px; border-radius: 12px; border: 2px solid white; text-align: center; color: white; font-weight: bold;">HQ</div>`,
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                });
+                
+                const hqMarker = L.marker([headquarters.lat, headquarters.lng], {
+                    icon: hqIcon
+                }).addTo(map);
+                
+                hqMarker.bindPopup(`<strong>Headquarters</strong><br>${headquarters.address}`);
+                routeMarkers.push(hqMarker);
+                
+                // Create route coordinates array (for polyline)
+                const routeCoordinates = [[headquarters.lat, headquarters.lng]];
+                
+                // Add stop markers
+                route.stops.forEach(stop => {
+                    if (!stop.lat || !stop.lng) return;
+                    
+                    const customIcon = L.divIcon({
+                        className: 'custom-div-icon',
+                        html: `<div style="background-color: ${statusColors[stop.status]}; width: 20px; height: 20px; border-radius: 10px; border: 2px solid white; text-align: center; line-height: 16px; font-weight: bold; color: white;">${stop.order}</div>`,
+                        iconSize: [20, 20],
+                        iconAnchor: [10, 10]
+                    });
+                    
+                    const marker = L.marker([stop.lat, stop.lng], {
+                        icon: customIcon
+                    }).addTo(map);
+                    
+                    marker.bindPopup(`
+                        <strong>${stop.machine_name}</strong><br>
+                        Status: ${getStatusDisplay(stop.status)}<br>
+                        Model: ${stop.model}<br>
+                        Address: ${stop.address || 'No address'}<br>
+                        Warnings: ${stop.warnings_count}
+                    `);
+                    
+                    routeMarkers.push(marker);
+                    routeCoordinates.push([stop.lat, stop.lng]);
+                });
+                
+                // Add headquarters as last point (return journey)
+                routeCoordinates.push([headquarters.lat, headquarters.lng]);
+                
+                // Create route polyline
+                routePolyline = L.polyline(routeCoordinates, {
+                    color: 'blue',
+                    weight: 3,
+                    opacity: 0.7,
+                    dashArray: '10, 10'
+                }).addTo(map);
+                
+                // Fit map to show all markers
+                if (routeCoordinates.length > 1) {
+                    const bounds = L.latLngBounds(routeCoordinates);
+                    map.fitBounds(bounds.pad(0.1));
+                }
+            }
+            
+            // Helper function to get badge color for status
+            function getStatusBadgeColor(status) {
+                switch (status) {
+                    case 'planned': return 'info';
+                    case 'in_progress': return 'warning';
+                    case 'completed': return 'success';
+                    case 'cancelled': return 'secondary';
+                    default: return 'secondary';
+                }
+            }
+            
+            // Helper function to get display text for status
+            function getStatusDisplay(status) {
+                switch (status) {
+                    case 'planned': return 'Planned';
+                    case 'in_progress': return 'In Progress';
+                    case 'completed': return 'Completed';
+                    case 'cancelled': return 'Cancelled';
+                    case 'operational': return 'Operational';
+                    case 'warning': return 'Warning';
+                    case 'critical': return 'Critical';
+                    case 'offline': return 'Offline';
+                    case 'maintenance': return 'Maintenance';
+                    default: return status.charAt(0).toUpperCase() + status.slice(1);
+                }
+            }
+
+            // Add event listener for the refresh button
+            document.getElementById('refresh-routes-btn').addEventListener('click', refreshRoutes);
+            
+            // Function to refresh routes without reloading the page
+            function refreshRoutes() {
+                // Show spinner
+                const spinner = document.getElementById('refresh-spinner');
+                spinner.style.display = 'block';
+                
+                // Get current filter values
+                const technicianId = document.getElementById('technician').value;
+                const dateFilter = document.getElementById('date').value;
+                
+                // Build query string
+                let queryString = '';
+                if (technicianId) {
+                    queryString += `technician=${technicianId}`;
+                }
+                if (dateFilter) {
+                    if (queryString) queryString += '&';
+                    queryString += `date=${dateFilter}`;
+                }
+                
+                // Fetch updated routes data
+                fetch(`/api/collector/routes/list/?${queryString}`)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        updateRoutesList(data);
+                    })
+                    .catch(error => {
+                        console.error('Error refreshing routes:', error);
+                        alert('Could not refresh routes data');
+                    })
+                    .finally(() => {
+                        // Hide spinner
+                        spinner.style.display = 'none';
+                    });
+            }
+            
+            // Function to update routes list in UI
+            function updateRoutesList(routes) {
+                const routesList = document.getElementById('routes-list');
+                
+                // Clear current content
+                routesList.innerHTML = '';
+                
+                if (routes.length === 0) {
+                    routesList.innerHTML = `
+                        <div class="list-group-item">
+                            No routes found with the selected filters.
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Add routes to the list
+                routes.forEach(route => {
+                    const routeElement = document.createElement('a');
+                    routeElement.href = '#';
+                    routeElement.className = 'list-group-item list-group-item-action position-relative route-item';
+                    routeElement.setAttribute('data-route-id', route.id);
+                    
+                    const technicianName = route.technician.first_name && route.technician.last_name ? 
+                        `${route.technician.first_name} ${route.technician.last_name}` : 
+                        route.technician.username;
+                    
+                    let statusBadgeClass = 'secondary';
+                    switch(route.status) {
+                        case 'planned': statusBadgeClass = 'info'; break;
+                        case 'in_progress': statusBadgeClass = 'warning'; break;
+                        case 'completed': statusBadgeClass = 'success'; break;
+                        case 'cancelled': statusBadgeClass = 'secondary'; break;
+                    }
+                    
+                    routeElement.innerHTML = `
+                        <div class="d-flex w-100 justify-content-between">
+                            <h5 class="mb-1">${route.name}</h5>
+                            <small>${route.date}</small>
+                        </div>
+                        <p class="mb-1">Technician: ${technicianName}</p>
+                        <small>
+                            Status: <span class="badge bg-${statusBadgeClass}">
+                                ${getStatusDisplay(route.status)}
+                            </span>
+                        </small>
+                        <small>Estimated time: ${parseFloat(route.estimated_duration).toFixed(1)} hours</small>
+                        ${route.is_delegation ? '<span class="badge bg-dark delegation-badge">Business Trip</span>' : ''}
+                    `;
+                    
+                    routesList.appendChild(routeElement);
+                    
+                    // Add click event to the new route element
+                    routeElement.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        
+                        // Highlight selected route
+                        document.querySelectorAll('.route-item').forEach(el => {
+                            el.classList.remove('active');
+                        });
+                        this.classList.add('active');
+                        
+                        // Get route details
+                        const routeId = this.getAttribute('data-route-id');
+                        fetchRouteDetails(routeId);
+                    });
+                });
+            }
+        });
+    </script>
+</body>
+</html>

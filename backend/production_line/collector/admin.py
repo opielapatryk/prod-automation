@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Machine, Location, Telemetry, Warning, WarningRule, ServiceRecord
+from .models import Machine, Location, Telemetry, Warning, WarningRule, ServiceRecord, Route, RouteStop
 
 @admin.register(Machine)
 class MachineAdmin(admin.ModelAdmin):
@@ -35,3 +35,39 @@ class ServiceRecordAdmin(admin.ModelAdmin):
     list_display = ('machine', 'technician', 'service_date')
     list_filter = ('service_date', 'technician')
     filter_horizontal = ('resolved_warnings',)
+
+class RouteStopInline(admin.TabularInline):
+    model = RouteStop
+    extra = 1
+
+@admin.register(Route)
+class RouteAdmin(admin.ModelAdmin):
+    list_display = ('name', 'technician', 'date', 'estimated_duration', 'status', 'is_delegation')
+    list_filter = ('status', 'technician', 'date')
+    search_fields = ('name', 'notes')
+    inlines = [RouteStopInline]
+    readonly_fields = ('created_at', 'updated_at')
+    
+    fieldsets = (
+        (None, {
+            'fields': ('name', 'technician', 'date', 'status')
+        }),
+        ('Route Details', {
+            'fields': ('estimated_duration', 'start_location', 'notes')
+        }),
+        ('System Fields', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        })
+    )
+    
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if not change:  # If it's a new route
+            obj.calculate_estimated_duration()
+
+@admin.register(RouteStop)
+class RouteStopAdmin(admin.ModelAdmin):
+    list_display = ('route', 'machine', 'order', 'estimated_service_time', 'completed')
+    list_filter = ('route', 'completed')
+    search_fields = ('route__name', 'machine__name')
