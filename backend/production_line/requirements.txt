@@ -1,0 +1,8 @@
+asgiref==3.8.1
+Django==5.1.7
+sqlparse==0.5.3
+psycopg2-binary>=2.9
+dj_database_url==1.2.0
+djangorestframework==3.14.0
+pyyaml==6.0
+drf-yasg==1.21.7
