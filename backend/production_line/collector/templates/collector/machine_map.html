@@ -103,22 +103,22 @@
             };
             
             // Add markers for each machine with location
-            const machines = []
-            //     {% for machine in machines %}
-            //     {% if machine.location %}
-            //     {
-            //         name: "{{ machine.name|escapejs }}",
-            //         status: "{{ machine.status|escapejs }}",
-            //         model: "{{ machine.model|escapejs }}",
-            //         manufacturer: "{{ machine.manufacturer|escapejs }}",
-            //         serial_number: "{{ machine.serial_number|escapejs }}",
-            //         lat: {{ machine.location.latitude }},
-            //         lng: {{ machine.location.longitude }},
-            //         address: "{{ machine.location.address|default:'No address'|escapejs }}"
-            //     }{% if not forloop.last %},{% endif %}
-            //     {% endif %}
-            //     {% endfor %}
-            // ];
+            const machines = [
+                {% for machine in machines %}
+                {% if machine.location %}
+                {
+                    name: "{{ machine.name|escapejs }}",
+                    status: "{{ machine.status|escapejs }}",
+                    model: "{{ machine.model|escapejs }}",
+                    manufacturer: "{{ machine.manufacturer|escapejs }}",
+                    serial_number: "{{ machine.serial_number|escapejs }}",
+                    lat: {{ machine.location.latitude }},
+                    lng: {{ machine.location.longitude }},
+                    address: "{{ machine.location.address|default:'No address'|escapejs }}"
+                }{% if not forloop.last %},{% endif %}
+                {% endif %}
+                {% endfor %}
+            ];
             
             machines.forEach(machine => {
                 const customIcon = L.divIcon({
