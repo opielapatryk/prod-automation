@@ -1,7 +1,8 @@
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 import json
@@ -88,7 +89,9 @@ def routes(request):
     
     return render(request, 'collector/routes.html', context)
 
+@csrf_exempt  # Place this decorator first
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def optimize_route(request):
     """
     API endpoint to optimize a route based on machine locations.
@@ -292,7 +295,9 @@ def optimize_route(request):
     
     return Response(result)
 
+@csrf_exempt
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def route_details(request, route_id):
     """
     API endpoint to get detailed information about a route.
@@ -372,7 +377,9 @@ def route_details(request, route_id):
         )
     }
 )
+@csrf_exempt
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def get_machines_with_warnings(request):
     """
     API endpoint to get machines with active warnings.
@@ -422,6 +429,7 @@ def get_machines_with_warnings(request):
 )
 @csrf_exempt
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def receive_telemetry(request):
     """
     API endpoint to receive telemetry data from machines and check against warning rules.
@@ -490,7 +498,9 @@ def receive_telemetry(request):
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+@csrf_exempt
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def routes_list(request):
     """
     API endpoint to get filtered list of routes for the refresh functionality.
@@ -527,7 +537,9 @@ def routes_list(request):
     
     return Response(data)
 
+@csrf_exempt
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def get_machines(request):
     """
     API endpoint to get all machines with their locations and status.
@@ -556,6 +568,7 @@ def get_machines(request):
 
 @csrf_exempt
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def create_route(request):
     """
     API endpoint to create a new route from optimized data
