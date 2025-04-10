@@ -1,8 +1,8 @@
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
-from collector.models import Location, Machine, WarningRule, Telemetry, Warning, ServiceRecord
+from collector.models import Location, Machine, WarningRule, Telemetry, Warning, ServiceRecord, Route, RouteStop
 from django.utils import timezone
-from datetime import timedelta
+from datetime import timedelta, date
 import random
 import decimal
 
@@ -16,7 +16,7 @@ class Command(BaseCommand):
         self.clear_data()
         
         # Tworzenie użytkownika administratora jeśli nie istnieje
-        self.create_users()
+        technicians = self.create_users()
         
         # Tworzenie lokalizacji
         locations = self.create_locations()
@@ -33,6 +33,9 @@ class Command(BaseCommand):
         # Tworzenie historii serwisowej
         self.create_service_records(machines)
         
+        # Tworzenie przykładowych tras
+        self.create_routes(technicians, machines)
+        
         self.stdout.write(self.style.SUCCESS('Dane testowe zostały pomyślnie załadowane!'))
 
     def clear_data(self):
@@ -42,6 +45,8 @@ class Command(BaseCommand):
         Warning.objects.all().delete()
         Telemetry.objects.all().delete()
         WarningRule.objects.all().delete()
+        RouteStop.objects.all().delete()  # Dodane usuwanie przystanków trasy
+        Route.objects.all().delete()      # Dodane usuwanie tras
         Machine.objects.all().delete()
         Location.objects.all().delete()
 
@@ -50,6 +55,7 @@ class Command(BaseCommand):
         self.stdout.write('Tworzenie użytkowników...')
         
         # Utwórz administratora
+        admin = None
         if not User.objects.filter(username='admin').exists():
             admin = User.objects.create_superuser(
                 username='admin',
@@ -57,6 +63,8 @@ class Command(BaseCommand):
                 password='admin123'
             )
             self.stdout.write(f'Utworzono administratora: {admin.username}')
+        else:
+            admin = User.objects.get(username='admin')
         
         # Utwórz techników
         technicians = []
@@ -72,6 +80,14 @@ class Command(BaseCommand):
                 )
                 technicians.append(tech)
                 self.stdout.write(f'Utworzono technika: {tech.username}')
+            else:
+                # Dodaj istniejących techników do listy
+                tech = User.objects.get(username=username)
+                technicians.append(tech)
+                
+        # Jeśli brak techników, dodaj administratora do listy techników
+        if not technicians and admin:
+            technicians.append(admin)
         
         return technicians
 
@@ -354,3 +370,91 @@ class Command(BaseCommand):
                 service_records_count += 1
         
         self.stdout.write(f'Utworzono {service_records_count} rekordów serwisowych')
+
+    def create_routes(self, technicians, machines):
+        """Tworzy przykładowe trasy dla techników"""
+        self.stdout.write('Tworzenie przykładowych tras...')
+        
+        if not technicians or len(technicians) == 0:
+            self.stdout.write(self.style.WARNING('Brak techników do przypisania tras'))
+            return []
+        
+        # Upewnienie się, że istnieją technici - jeśli nie, tworzymy ich
+        if not technicians:
+            for i in range(1, 4):
+                username = f'tech{i}'
+                tech = User.objects.create_user(
+                    username=username,
+                    email=f'tech{i}@example.com',
+                    password='tech123',
+                    first_name=f'Technik {i}',
+                    last_name='Serwisowy'
+                )
+                technicians.append(tech)
+                self.stdout.write(f'Utworzono technika: {tech.username}')
+                
+        today = date.today()
+        
+        # Tworzenie przykładowych nazw tras
+        route_names = [
+            "Przegląd kwartalny - Warszawa",
+            "Przegląd maszyn - Kraków",
+            "Konserwacja pianek - Wrocław",
+            "Przegląd techniczny - Gdańsk",
+            "Naprawa urządzeń - Poznań",
+            "Przegląd przedsezonowy - Zakopane",
+            "Interwencja awaryjna - Łódź"
+        ]
+        
+        # Statusy tras
+        statuses = ['planned', 'in_progress', 'completed']
+        
+        routes = []
+        # Tworzenie kilku tras
+        for i in range(5):
+            # Wybierz losowego technika
+            tech = random.choice(technicians)
+            
+            # Ustal datę trasy (od dziś do 30 dni w przyszłość)
+            route_date = today + timedelta(days=random.randint(0, 30))
+            
+            # Wybierz nazwę trasy
+            name = random.choice(route_names) + f" #{i+1}"
+            
+            # Utwórz trasę
+            route = Route.objects.create(
+                name=name,
+                technician=tech,
+                date=route_date,
+                estimated_duration=0,  # Zostanie obliczone później
+                status=random.choice(statuses),
+                start_location='Warsaw, Poland',
+                notes=f"Przykładowa trasa utworzona automatycznie. ID: {i+1}"
+            )
+            
+            # Dodaj 3-5 losowych maszyn do trasy
+            try:
+                route_machines = random.sample(list(machines), min(random.randint(3, 5), len(machines)))
+                
+                for idx, machine in enumerate(route_machines, 1):
+                    RouteStop.objects.create(
+                        route=route,
+                        machine=machine,
+                        order=idx,
+                        estimated_service_time=1.0,  # 1 godzina na maszynę
+                        completed=(route.status == 'completed')
+                    )
+                
+                # Oblicz szacowany czas trwania
+                route.calculate_estimated_duration()
+            except Exception as e:
+                self.stdout.write(self.style.ERROR(f"Błąd przy dodawaniu przystanków do trasy: {e}"))
+            
+            routes.append(route)
+            
+        # Debug info
+        self.stdout.write(f'Utworzono {len(routes)} tras')
+        for route in routes:
+            self.stdout.write(f'  - {route.name} dla {route.technician.username}, przystanki: {route.routestop_set.count()}')
+        
+        return routes

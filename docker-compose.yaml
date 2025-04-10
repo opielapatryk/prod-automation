@@ -13,7 +13,7 @@ services:
     depends_on:
       - postgres
     # Zmiana polecenia na uruchomienie skryptu startowego
-    command: bash /app/docker-entrypoint.sh
+    command: bash -c "chmod +x /app/docker-entrypoint.sh && /app/docker-entrypoint.sh"
   
   postgres:
     image: postgres:15

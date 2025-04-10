@@ -118,7 +118,7 @@ class Route(models.Model):
     estimated_duration = models.FloatField(help_text="Estimated duration in hours")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='planned')
     machines = models.ManyToManyField(Machine, through='RouteStop')
-    start_location = models.CharField(max_length=255, default="Warsaw, Poland")
+    start_location = models.CharField(max_length=255, default="Warsaw, Poland (Basecamp)")  # Updated to emphasize basecamp status
     notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -131,8 +131,13 @@ class Route(models.Model):
         return self.estimated_duration > 8.0
     
     def calculate_estimated_duration(self):
-        """Calculate the estimated duration of the route based on stops and travel times using geographic data"""
+        """
+        Calculate the estimated duration of the route based on stops and travel times.
+        Routes always start and end at headquarters (Warsaw basecamp).
+        """
         from math import radians, cos, sin, asin, sqrt
+        import datetime
+        import json
         
         # Helper function to calculate distance between coordinates (Haversine formula)
         def calculate_distance(lat1, lon1, lat2, lon2):
@@ -151,62 +156,146 @@ class Route(models.Model):
             r = 6371  # Radius of earth in kilometers
             return c * r
         
-        # Average speed in km/h for car travel
-        avg_speed = 60
+        # Average speed in km/h for car travel - adjustable for different road conditions
+        avg_speeds = {
+            'city': 30,      # km/h in city traffic
+            'suburban': 70,  # km/h in suburban areas
+            'highway': 100   # km/h on highways
+        }
         
-        # Warsaw coordinates (headquarters)
+        # Default to mixed travel type - 70% highway, 20% suburban, 10% city
+        def estimate_travel_speed(distance):
+            if distance < 5:     # Short city trips
+                return avg_speeds['city']
+            elif distance < 30:  # Suburban/mixed
+                return (avg_speeds['city'] * 0.2 + avg_speeds['suburban'] * 0.8)
+            else:                # Longer highway trips
+                return (avg_speeds['highway'] * 0.7 + avg_speeds['suburban'] * 0.2 + avg_speeds['city'] * 0.1)
+        
+        # Warsaw coordinates (headquarters/basecamp)
         hq_lat, hq_lng = 52.2297, 21.0122
         
+        # Initialize variables for tracking
         total_hours = 0
+        total_distance = 0
+        detailed_segments = []
+        
         stops = list(self.routestop_set.all().order_by('order'))
         
         if not stops:
             self.estimated_duration = 0
             self.save()
             return 0
-            
-        # Calculate distance from HQ to first stop
-        first_stop = stops[0]
-        if first_stop.machine.location:
-            first_lat = float(first_stop.machine.location.latitude)
-            first_lng = float(first_stop.machine.location.longitude)
-            distance_to_first = calculate_distance(hq_lat, hq_lng, first_lat, first_lng)
-            travel_time_to_first = distance_to_first / avg_speed
-            total_hours += travel_time_to_first
-            
-        # Add service time for each stop
-        for stop in stops:
-            total_hours += stop.estimated_service_time
-            
-        # Calculate travel time between stops
-        for i in range(len(stops) - 1):
-            current_stop = stops[i]
-            next_stop = stops[i + 1]
-            
-            if current_stop.machine.location and next_stop.machine.location:
-                current_lat = float(current_stop.machine.location.latitude)
-                current_lng = float(current_stop.machine.location.longitude)
-                next_lat = float(next_stop.machine.location.latitude)
-                next_lng = float(next_stop.machine.location.longitude)
-                
-                distance = calculate_distance(current_lat, current_lng, next_lat, next_lng)
-                travel_time = distance / avg_speed
-                total_hours += travel_time
         
-        # Calculate return trip from last stop to HQ
-        last_stop = stops[-1]
-        if last_stop.machine.location:
-            last_lat = float(last_stop.machine.location.latitude)
-            last_lng = float(last_stop.machine.location.longitude)
-            distance_to_hq = calculate_distance(last_lat, last_lng, hq_lat, hq_lng)
-            travel_time_to_hq = distance_to_hq / avg_speed
-            total_hours += travel_time_to_hq
+        # Sequential travel - from HQ to first stop, then between stops, then back to HQ
+        prev_lat, prev_lng = hq_lat, hq_lng
+        prev_name = "Headquarters"
+        
+        # Visit each stop in order
+        for stop in stops:
+            if stop.machine.location:
+                curr_lat = float(stop.machine.location.latitude)
+                curr_lng = float(stop.machine.location.longitude)
+                curr_name = stop.machine.name
+                
+                # Calculate travel from previous stop (or HQ) to this stop
+                distance = calculate_distance(prev_lat, prev_lng, curr_lat, curr_lng)
+                speed = estimate_travel_speed(distance)
+                travel_time = distance / speed
+                
+                total_distance += distance
+                total_hours += travel_time
+                
+                # Record this travel segment
+                detailed_segments.append({
+                    'type': 'travel',
+                    'from': prev_name,
+                    'to': curr_name,
+                    'distance': round(distance, 1),
+                    'duration': round(travel_time, 2),
+                    'speed': round(speed, 1)
+                })
+                
+                # Service time at this location
+                service_time = stop.estimated_service_time
+                total_hours += service_time
+                
+                # Record the service segment
+                detailed_segments.append({
+                    'type': 'service',
+                    'location': curr_name,
+                    'duration': service_time,
+                    'address': stop.machine.location.address if stop.machine.location else "No address"
+                })
+                
+                # Update previous location for next segment
+                prev_lat, prev_lng = curr_lat, curr_lng
+                prev_name = curr_name
+        
+        # Finally, travel from last stop back to headquarters (basecamp)
+        if stops:
+            last_stop = stops[-1]
+            if last_stop.machine.location:
+                distance_to_hq = calculate_distance(
+                    float(last_stop.machine.location.latitude),
+                    float(last_stop.machine.location.longitude),
+                    hq_lat, hq_lng
+                )
+                speed = estimate_travel_speed(distance_to_hq)
+                travel_time_to_hq = distance_to_hq / speed
+                
+                total_distance += distance_to_hq
+                total_hours += travel_time_to_hq
+                
+                detailed_segments.append({
+                    'type': 'travel',
+                    'from': last_stop.machine.name,
+                    'to': 'Headquarters (Basecamp)',  # Updated to emphasize basecamp status
+                    'distance': round(distance_to_hq, 1),
+                    'duration': round(travel_time_to_hq, 2),
+                    'speed': round(speed, 1)
+                })
         
         # Add buffer time (15% for unexpected delays)
-        total_hours *= 1.15
+        raw_hours = total_hours
+        buffer_hours = total_hours * 0.15
+        total_hours += buffer_hours
         
-        self.estimated_duration = round(total_hours, 1)
+        # Format for human-readable time
+        hours = int(total_hours)
+        minutes = int((total_hours - hours) * 60)
+        formatted_duration = f"{hours}h {minutes}min"
+        
+        # Store the detailed segments as a property in notes field for future reference
+        summary = {
+            'total_distance': round(total_distance, 1),
+            'raw_duration_hours': round(raw_hours, 2),
+            'buffer_hours': round(buffer_hours, 2),
+            'total_duration_hours': round(total_hours, 2),
+            'formatted_duration': formatted_duration,
+            'segments': detailed_segments
+        }
+        
+        # Add the route calculation details to notes but preserve any existing notes
+        original_notes = self.notes or ""
+        if "Route calculation details" in original_notes:
+            # Replace the old calculation
+            import re
+            self.notes = re.sub(
+                r'\n\nRoute calculation details \(auto-generated\):.*', 
+                f'\n\nRoute calculation details (auto-generated):\n{json.dumps(summary, indent=2)}',
+                original_notes, 
+                flags=re.DOTALL
+            )
+        else:
+            # Append the new calculation
+            self.notes = original_notes + f"\n\nRoute calculation details (auto-generated):\n{json.dumps(summary, indent=2)}"
+        
+        # Store the route time information
+        self.estimated_duration = round(total_hours, 2)
         self.save()
+        
+        # Return the total duration in hours for convenience
         return total_hours
 
 class RouteStop(models.Model):

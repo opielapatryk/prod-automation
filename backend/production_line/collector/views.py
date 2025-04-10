@@ -53,24 +53,38 @@ def routes(request):
     """
     View to display and manage technician routes.
     """
+    print("DEBUG: Wejście do widoku routes")
     routes = Route.objects.all().order_by('date')
-    technicians = User.objects.filter(routes__isnull=False).distinct()
+    print(f"DEBUG: Liczba tras przed filtrowaniem: {routes.count()}")
+    
+    # Pobranie wszystkich techników do listy (nie tylko tych z trasami)
+    technicians = User.objects.exclude(is_staff=True, is_superuser=True) # Wykluczamy admina
+    if not technicians:
+        # Jeśli brak techników, pokaż wszystkich użytkowników
+        technicians = User.objects.all()
+    
+    print(f"DEBUG: Liczba techników dostępnych: {technicians.count()}")
     
     # Filter by technician if specified
     technician_id = request.GET.get('technician')
     if technician_id:
         routes = routes.filter(technician_id=technician_id)
+        print(f"DEBUG: Filtrowanie po techniku ID {technician_id}. Tras po filtrze: {routes.count()}")
     
     # Filter by date if specified
     date_filter = request.GET.get('date')
     if date_filter:
         routes = routes.filter(date=date_filter)
+        print(f"DEBUG: Filtrowanie po dacie {date_filter}. Tras po filtrze: {routes.count()}")
     
     context = {
         'routes': routes,
         'technicians': technicians,
-        'headquarters': "Warsaw, Poland",
+        'headquarters': "Warsaw, Poland (Basecamp)",  # Updated to emphasize basecamp status
     }
+    
+    print(f"DEBUG: Końcowa liczba tras w kontekście: {routes.count()}")
+    print(f"DEBUG: Końcowa liczba techników w kontekście: {len(technicians)}")
     
     return render(request, 'collector/routes.html', context)
 
@@ -78,7 +92,7 @@ def routes(request):
 def optimize_route(request):
     """
     API endpoint to optimize a route based on machine locations.
-    Takes a list of machine IDs and calculates the shortest route.
+    Always starts and ends at headquarters (Warsaw basecamp).
     """
     from math import radians, cos, sin, asin, sqrt
     import itertools
@@ -117,107 +131,115 @@ def optimize_route(request):
         r = 6371  # Radius of earth in kilometers
         return c * r
     
-    # Warsaw coordinates (headquarters)
+    # Warsaw coordinates (headquarters/basecamp)
     hq_lat, hq_lng = 52.2297, 21.0122
     
+    # Step 1: Create a distance matrix including headquarters
+    num_locations = len(machines) + 1  # +1 for HQ
+    distance_matrix = [[0 for _ in range(num_locations)] for _ in range(num_locations)]
+    
+    # Fill the distance matrix
+    # First row and column: distances between HQ and each machine
+    for i, machine in enumerate(machines, 1):
+        machine_lat = float(machine.location.latitude)
+        machine_lng = float(machine.location.longitude)
+        distance = calculate_distance(hq_lat, hq_lng, machine_lat, machine_lng)
+        distance_matrix[0][i] = distance_matrix[i][0] = distance
+    
+    # Distances between machines
+    for i in range(1, num_locations):
+        for j in range(i+1, num_locations):
+            machine_i = machines[i-1]
+            machine_j = machines[j-1]
+            distance = calculate_distance(
+                float(machine_i.location.latitude),
+                float(machine_i.location.longitude),
+                float(machine_j.location.latitude),
+                float(machine_j.location.longitude)
+            )
+            distance_matrix[i][j] = distance_matrix[j][i] = distance
+    
     # For a small number of machines, we can try all permutations
-    # For larger datasets, we'd need a more efficient algorithm like a heuristic
+    # For larger datasets, we'd need a more efficient algorithm
+    best_distance = float('inf')
+    best_order = None
+    
     if len(machines) <= 8:  # Beyond 8 machines, permutations become too computationally expensive
-        # Create all possible routes
-        all_permutations = list(itertools.permutations(range(len(machines))))
-        best_distance = float('inf')
-        best_order = None
+        # Try all permutations of machine orders (excluding HQ which is always start and end)
+        all_permutations = list(itertools.permutations(range(1, num_locations)))
         
         for perm in all_permutations:
-            distance = 0
+            # Complete route: Start at HQ (0), visit all machines in order, return to HQ
+            route = (0,) + perm + (0,)
+            total_distance = sum(distance_matrix[route[i]][route[i+1]] for i in range(len(route)-1))
             
-            # Distance from HQ to first machine
-            first_machine = machines[perm[0]]
-            distance += calculate_distance(
-                hq_lat, hq_lng, 
-                float(first_machine.location.latitude), 
-                float(first_machine.location.longitude)
-            )
-            
-            # Distances between consecutive machines
-            for i in range(len(perm) - 1):
-                current_machine = machines[perm[i]]
-                next_machine = machines[perm[i + 1]]
-                
-                distance += calculate_distance(
-                    float(current_machine.location.latitude), 
-                    float(current_machine.location.longitude),
-                    float(next_machine.location.latitude), 
-                    float(next_machine.location.longitude)
-                )
-            
-            # Distance from last machine back to HQ
-            last_machine = machines[perm[-1]]
-            distance += calculate_distance(
-                float(last_machine.location.latitude), 
-                float(last_machine.location.longitude),
-                hq_lat, hq_lng
-            )
-            
-            if distance < best_distance:
-                best_distance = distance
+            if total_distance < best_distance:
+                best_distance = total_distance
                 best_order = perm
     else:
-        # For too many machines, use a simple greedy approach (nearest neighbor)
-        remaining_machines = machines.copy()
-        ordered_machines = []
+        # For too many machines, use a greedy nearest neighbor approach
+        current_location = 0  # Start at HQ
+        unvisited = set(range(1, num_locations))
+        route = [current_location]
+        total_distance = 0
         
-        # Start from HQ and always choose the closest next machine
-        current_lat, current_lng = hq_lat, hq_lng
-        best_order = []
+        while unvisited:
+            # Find closest unvisited location
+            next_location = min(unvisited, key=lambda loc: distance_matrix[current_location][loc])
+            total_distance += distance_matrix[current_location][next_location]
+            
+            # Move to next location
+            route.append(next_location)
+            unvisited.remove(next_location)
+            current_location = next_location
         
-        while remaining_machines:
-            best_distance = float('inf')
-            best_machine_idx = -1
-            
-            for i, machine in enumerate(remaining_machines):
-                dist = calculate_distance(
-                    current_lat, current_lng,
-                    float(machine.location.latitude), 
-                    float(machine.location.longitude)
-                )
-                
-                if dist < best_distance:
-                    best_distance = dist
-                    best_machine_idx = i
-            
-            best_machine = remaining_machines.pop(best_machine_idx)
-            ordered_machines.append(best_machine)
-            best_order.append(machine_ids.index(best_machine.id))
-            
-            current_lat = float(best_machine.location.latitude)
-            current_lng = float(best_machine.location.longitude)
+        # Return to HQ
+        route.append(0)
+        total_distance += distance_matrix[current_location][0]
+        
+        best_distance = total_distance
+        best_order = tuple(route[1:-1])  # Extract the order of machines (excluding HQ)
     
-    # Create the result with the optimized order
+    # Create the optimized route data
     optimized_machines = []
     total_distance = 0
-    avg_speed = 60  # km/h
+    avg_speeds = {
+        'city': 30,      # km/h in city traffic
+        'suburban': 70,  # km/h in suburban areas
+        'highway': 100   # km/h on highways
+    }
+    
+    # Default to mixed travel type - adjust speed based on distance
+    def estimate_travel_speed(distance):
+        if distance < 5:     # Short city trips
+            return avg_speeds['city']
+        elif distance < 30:  # Suburban/mixed
+            return (avg_speeds['city'] * 0.2 + avg_speeds['suburban'] * 0.8)
+        else:                # Longer highway trips
+            return (avg_speeds['highway'] * 0.7 + avg_speeds['suburban'] * 0.2 + avg_speeds['city'] * 0.1)
+    
+    # Calculate details for the optimized route
+    previous_lat, previous_lng = hq_lat, hq_lng
+    previous_location_name = "Headquarters"
     total_duration = 0
     
-    # Get first machine
-    current_lat, current_lng = hq_lat, hq_lng
-    
+    # Process each machine in the optimized order
     for idx in best_order:
-        machine = machines[idx]
-        
-        # Calculate distance from previous point
+        machine = machines[idx-1]  # -1 because idx starts from 1, but machines list starts from 0
         machine_lat = float(machine.location.latitude)
         machine_lng = float(machine.location.longitude)
         
-        distance = calculate_distance(current_lat, current_lng, machine_lat, machine_lng)
-        total_distance += distance
+        # Calculate distance and travel time from previous point
+        distance = calculate_distance(previous_lat, previous_lng, machine_lat, machine_lng)
+        speed = estimate_travel_speed(distance)
+        travel_time = distance / speed
         
-        # Calculate travel time in hours
-        travel_time = distance / avg_speed
+        total_distance += distance
+        total_duration += travel_time
         
         # Add 1 hour service time per machine
         service_time = 1.0
-        total_duration += travel_time + service_time
+        total_duration += service_time
         
         optimized_machines.append({
             'id': machine.id,
@@ -227,29 +249,42 @@ def optimize_route(request):
             'address': machine.location.address if machine.location.address else "Unknown",
             'travel_distance_from_previous': round(distance, 1),
             'travel_time_from_previous': round(travel_time, 1),
-            'service_time': service_time
+            'previous_location': previous_location_name,  # Add previous location name for better context
+            'service_time': service_time,
+            'speed': round(speed, 1)
         })
         
-        current_lat, current_lng = machine_lat, machine_lng
+        # Update previous location for next iteration
+        previous_lat, previous_lng = machine_lat, machine_lng
+        previous_location_name = machine.name
     
-    # Calculate return to HQ
-    return_distance = calculate_distance(current_lat, current_lng, hq_lat, hq_lng)
-    return_time = return_distance / avg_speed
+    # Calculate return trip to headquarters
+    return_distance = calculate_distance(previous_lat, previous_lng, hq_lat, hq_lng)
+    speed = estimate_travel_speed(return_distance)
+    return_time = return_distance / speed
+    
     total_distance += return_distance
     total_duration += return_time
     
-    # Add 15% buffer time
-    total_duration *= 1.15
+    # Add 15% buffer time for unexpected delays
+    buffer_duration = total_duration * 0.15
+    total_duration += buffer_duration
+    
+    # Format time in hours and minutes
+    hours = int(total_duration)
+    minutes = int((total_duration - hours) * 60)
     
     result = {
         'headquarters': {
             'lat': hq_lat,
             'lng': hq_lng,
-            'address': 'Warsaw, Poland'
+            'address': 'Warsaw, Poland (Basecamp)'  # Updated to emphasize basecamp status
         },
         'is_delegation': total_duration > 8.0,
         'total_distance': round(total_distance, 1),
-        'total_duration': round(total_duration, 1),
+        'total_duration': round(total_duration, 2),
+        'formatted_duration': f"{hours}h {minutes}min",
+        'buffer_time': round(buffer_duration, 2),
         'optimized_machines': optimized_machines,
         'return_distance': round(return_distance, 1),
         'return_time': round(return_time, 1)
