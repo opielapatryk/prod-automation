@@ -89,6 +89,51 @@ def routes(request):
     
     return render(request, 'collector/routes.html', context)
 
+@swagger_auto_schema(
+    method='post',
+    operation_description="Optimize a route based on machine locations. Computes the most efficient path for servicing selected machines, starting and ending at headquarters.",
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        required=['machine_ids'],
+        properties={
+            'machine_ids': openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Schema(type=openapi.TYPE_INTEGER),
+                description="List of machine IDs to include in the route"
+            )
+        }
+    ),
+    responses={
+        200: openapi.Response(
+            description="Successful optimization",
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'headquarters': openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            'lat': openapi.Schema(type=openapi.TYPE_NUMBER),
+                            'lng': openapi.Schema(type=openapi.TYPE_NUMBER),
+                            'address': openapi.Schema(type=openapi.TYPE_STRING)
+                        }
+                    ),
+                    'is_delegation': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'total_distance': openapi.Schema(type=openapi.TYPE_NUMBER),
+                    'total_duration': openapi.Schema(type=openapi.TYPE_NUMBER),
+                    'formatted_duration': openapi.Schema(type=openapi.TYPE_STRING),
+                    'optimized_machines': openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Schema(
+                            type=openapi.TYPE_OBJECT
+                        )
+                    )
+                }
+            )
+        ),
+        400: "Bad request - missing machine IDs or invalid request",
+        404: "Machine not found"
+    }
+)
 @csrf_exempt  # Place this decorator first
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -295,6 +340,40 @@ def optimize_route(request):
     
     return Response(result)
 
+@swagger_auto_schema(
+    method='get',
+    operation_description="Get detailed information about a specific route, including all stops and machine status.",
+    responses={
+        200: openapi.Response(
+            description="Route details", 
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                    'name': openapi.Schema(type=openapi.TYPE_STRING),
+                    'technician': openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                            'name': openapi.Schema(type=openapi.TYPE_STRING)
+                        }
+                    ),
+                    'date': openapi.Schema(type=openapi.TYPE_STRING, format='date'),
+                    'status': openapi.Schema(type=openapi.TYPE_STRING),
+                    'estimated_duration': openapi.Schema(type=openapi.TYPE_NUMBER),
+                    'is_delegation': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'stops': openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Schema(
+                            type=openapi.TYPE_OBJECT
+                        )
+                    )
+                }
+            )
+        ),
+        404: "Route not found"
+    }
+)
 @csrf_exempt
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -498,6 +577,42 @@ def receive_telemetry(request):
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+@swagger_auto_schema(
+    method='get',
+    operation_description="Get a filtered list of routes for display and refresh functionality",
+    manual_parameters=[
+        openapi.Parameter('technician', openapi.IN_QUERY, description="Filter by technician ID", type=openapi.TYPE_INTEGER),
+        openapi.Parameter('date', openapi.IN_QUERY, description="Filter by date (YYYY-MM-DD)", type=openapi.TYPE_STRING)
+    ],
+    responses={
+        200: openapi.Response(
+            description="List of routes",
+            schema=openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'name': openapi.Schema(type=openapi.TYPE_STRING),
+                        'date': openapi.Schema(type=openapi.TYPE_STRING, format='date'),
+                        'technician': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                                'username': openapi.Schema(type=openapi.TYPE_STRING),
+                                'first_name': openapi.Schema(type=openapi.TYPE_STRING),
+                                'last_name': openapi.Schema(type=openapi.TYPE_STRING)
+                            }
+                        ),
+                        'status': openapi.Schema(type=openapi.TYPE_STRING),
+                        'estimated_duration': openapi.Schema(type=openapi.TYPE_NUMBER),
+                        'is_delegation': openapi.Schema(type=openapi.TYPE_BOOLEAN)
+                    }
+                )
+            )
+        )
+    }
+)
 @csrf_exempt
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -537,6 +652,39 @@ def routes_list(request):
     
     return Response(data)
 
+@swagger_auto_schema(
+    method='get',
+    operation_description="Get all machines with their locations and status information",
+    responses={
+        200: openapi.Response(
+            description="List of machines",
+            schema=openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'name': openapi.Schema(type=openapi.TYPE_STRING),
+                        'status': openapi.Schema(type=openapi.TYPE_STRING),
+                        'serial_number': openapi.Schema(type=openapi.TYPE_STRING),
+                        'model': openapi.Schema(type=openapi.TYPE_STRING),
+                        'manufacturer': openapi.Schema(type=openapi.TYPE_STRING),
+                        'active_warnings_count': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'location': openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            nullable=True,
+                            properties={
+                                'lat': openapi.Schema(type=openapi.TYPE_NUMBER),
+                                'lng': openapi.Schema(type=openapi.TYPE_NUMBER),
+                                'address': openapi.Schema(type=openapi.TYPE_STRING, nullable=True)
+                            }
+                        )
+                    }
+                )
+            )
+        )
+    }
+)
 @csrf_exempt
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -566,6 +714,57 @@ def get_machines(request):
     
     return Response(data)
 
+@swagger_auto_schema(
+    method='post',
+    operation_description="Create a new service route from optimized data",
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        required=['name', 'date', 'technician_id', 'machines', 'estimated_duration'],
+        properties={
+            'name': openapi.Schema(type=openapi.TYPE_STRING, description="Route name"),
+            'date': openapi.Schema(type=openapi.TYPE_STRING, format='date', description="Route date"),
+            'technician_id': openapi.Schema(type=openapi.TYPE_INTEGER, description="Technician ID"),
+            'estimated_duration': openapi.Schema(type=openapi.TYPE_NUMBER, description="Estimated duration in hours"),
+            'start_location': openapi.Schema(type=openapi.TYPE_STRING, description="Starting location"),
+            'machines': openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'machine_id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'order': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        'estimated_service_time': openapi.Schema(type=openapi.TYPE_NUMBER)
+                    }
+                )
+            )
+        }
+    ),
+    responses={
+        201: openapi.Response(
+            description="Route created successfully",
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                    'name': openapi.Schema(type=openapi.TYPE_STRING),
+                    'date': openapi.Schema(type=openapi.TYPE_STRING, format='date'),
+                    'technician': openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                            'name': openapi.Schema(type=openapi.TYPE_STRING)
+                        }
+                    ),
+                    'estimated_duration': openapi.Schema(type=openapi.TYPE_NUMBER),
+                    'is_delegation': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'status': openapi.Schema(type=openapi.TYPE_STRING)
+                }
+            )
+        ),
+        400: "Bad request - missing required fields or invalid data",
+        404: "Technician not found"
+    }
+)
 @csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])

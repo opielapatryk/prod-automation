@@ -16,16 +16,17 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.shortcuts import redirect
 from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 
-# Konfiguracja widoku schematu Swagger
+# Update Swagger schema view configuration
 schema_view = get_schema_view(
    openapi.Info(
       title="Production Line Monitoring API",
       default_version='v1',
-      description="API dokumentacja dla systemu monitorowania linii produkcyjnych",
+      description="API documentation for Production Line Monitoring System - Service Routes and Technician Management",
       terms_of_service="https://www.example.com/policies/terms/",
       contact=openapi.Contact(email="contact@productionline.example"),
       license=openapi.License(name="BSD License"),
@@ -36,9 +37,12 @@ schema_view = get_schema_view(
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/collector/', include('collector.urls')),
+    path('', include('collector.urls')),
     
-    # Dokumentacja Swagger/OpenAPI
-    path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
-    path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
+    # Swagger/OpenAPI documentation with better naming
+    # path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
+    # path('swagger<str:format>', schema_view.without_ui(cache_timeout=0), name='schema-json'),
+    # path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
+    # # Add a root redirect to Swagger docs for convenience
+    # path('', lambda request: redirect('schema-swagger-ui')),
 ]

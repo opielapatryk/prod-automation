@@ -285,6 +285,31 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            // Function to get CSRF token - make sure this is at the top
+            function getCookie(name) {
+                let cookieValue = null;
+                if (document.cookie && document.cookie !== '') {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i].trim();
+                        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                            break;
+                        }
+                    }
+                }
+                return cookieValue;
+            }
+
+            // CSRF headers for fetch requests
+            function getHeaders() {
+                return {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'X-Requested-With': 'XMLHttpRequest' // This helps Django identify AJAX requests
+                };
+            }
+
             let map = null;
             let routeMarkers = [];
             let routePolyline = null;
@@ -305,7 +330,7 @@
                 'offline': '#6c757d',
                 'maintenance': '#17a2b8'
             };
-            
+
             // Handle route item clicks
             document.querySelectorAll('.route-item').forEach(item => {
                 item.addEventListener('click', function(e) {
@@ -325,7 +350,7 @@
             
             // Fetch route details from API
             function fetchRouteDetails(routeId) {
-                fetch(`/api/collector/routes/${routeId}/`)
+                fetch(`/routes/${routeId}/`)
                     .then(response => {
                         if (!response.ok) {
                             throw new Error('Network response was not ok');
@@ -548,7 +573,7 @@
                 }
                 
                 // Fetch updated routes data
-                fetch(`/api/collector/routes/list/?${queryString}`)
+                fetch(`/routes/list/?${queryString}`)
                     .then(response => {
                         if (!response.ok) {
                             throw new Error('Network response was not ok');
@@ -878,7 +903,7 @@
                 console.log('test machines');
                 
                 // Fetch machines from API
-                fetch('/api/collector/machines/')
+                fetch('/machines/')
                     .then(response => {
                         if (!response.ok) {
                             throw new Error('Network response was not ok');
@@ -953,12 +978,9 @@
                 optimizeBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Optimizing...';
                 
                 // Call optimize API
-                fetch('/api/collector/routes/optimize/', {
+                fetch('/routes/optimize/', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCookie('csrftoken'),
-                    },
+                    headers: getHeaders(),
                     body: JSON.stringify({
                         machine_ids: selectedMachines
                     })
@@ -1097,11 +1119,9 @@
                     };
                     
                     // Call create route API
-                    fetch('/api/collector/routes/create/', {
+                    fetch('/routes/create/', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
+                        headers: getHeaders(),
                         body: JSON.stringify(routeData)
                     })
                     .then(response => {
@@ -1317,12 +1337,9 @@
                 optimizeBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Optimizing...';
                 
                 // Call optimize API
-                fetch('/api/collector/routes/optimize/', {
+                fetch('/routes/optimize/', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCookie('csrftoken'),
-                    },
+                    headers: getHeaders(),
                     body: JSON.stringify({
                         machine_ids: selectedMachines
                     })
@@ -1358,23 +1375,6 @@
             // Function to save route
             function saveRouteFromUI() {
                 saveRoute();
-            }
-
-            // Add this function to extract the CSRF token from cookies
-            function getCookie(name) {
-                let cookieValue = null;
-                if (document.cookie && document.cookie !== '') {
-                    const cookies = document.cookie.split(';');
-                    for (let i = 0; i < cookies.length; i++) {
-                        const cookie = cookies[i].trim();
-                        // Does this cookie string begin with the name we want?
-                        if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                            break;
-                        }
-                    }
-                }
-                return cookieValue;
             }
         });
     </script>
