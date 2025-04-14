@@ -691,130 +691,23 @@
                 return true;
             }
             
-            // Setup button event listeners with proper error handling
-            function setupModalButtons() {
-                console.log("Setting up modal buttons");
-                
-                // Step 1 Next button
-                const step1NextBtn = document.getElementById('step1-next-btn');
-                if (step1NextBtn) {
-                    step1NextBtn.addEventListener('click', function() {
-                        console.log("Next button clicked");
-                        try {
-                            // Fix: There might be conflicts with element IDs in the route details panel and the modal form
-                            // Use more specific selectors to ensure we're getting the modal form fields
-                            const modalBody = document.querySelector('#createRouteModal .modal-body');
-                            const routeNameInput = modalBody.querySelector('#route-name');
-                            const routeDateInput = modalBody.querySelector('#route-date');
-                            const routeTechnicianInput = modalBody.querySelector('#route-technician');
-                            
-                            console.log("Form elements:", {
-                                nameFound: !!routeNameInput, 
-                                dateFound: !!routeDateInput, 
-                                techFound: !!routeTechnicianInput
-                            });
-                            
-                            if (!routeNameInput || !routeDateInput || !routeTechnicianInput) {
-                                console.error('Form elements not found:', 
-                                    !routeNameInput ? 'route-name missing' : '',
-                                    !routeDateInput ? 'route-date missing' : '',
-                                    !routeTechnicianInput ? 'route-technician missing' : ''
-                                );
-                                showError('Form error: Required form fields not found');
-                                return;
-                            }
-                            
-                            const routeName = routeNameInput.value ? routeNameInput.value.trim() : '';
-                            const routeDate = routeDateInput.value || '';
-                            const technicianId = routeTechnicianInput.value || '';
-                            
-                            console.log("Form values:", {routeName, routeDate, technicianId});
-                            
-                            if (!routeName) {
-                                showError('Please enter a route name');
-                                return;
-                            }
-                            if (!routeDate) {
-                                showError('Please select a date');
-                                return;
-                            }
-                            if (!technicianId) {
-                                showError('Please select a technician');
-                                return;
-                            }
-                            
-                            hideError();
-                            
-                            // Show Step 2, hide Step 1
-                            const step1 = modalBody.querySelector('#step1');
-                            const step2 = modalBody.querySelector('#step2');
-                            
-                            if (!step1 || !step2) {
-                                console.error('Step elements not found:', !step1 ? 'step1 missing' : '', !step2 ? 'step2 missing' : '');
-                                return;
-                            }
-                            
-                            step1.style.display = 'none';
-                            step2.style.display = 'block';
-                            
-                            // Load machines for Step 2
-                            loadMachines();
-                        } catch (error) {
-                            console.error('Error in next button handler:', error);
-                            showError('An error occurred. Please try again.');
-                        }
-                    });
-                } else {
-                    console.error('Next button not found');
-                }
-                
-                // Step 2 Back button
-                const step2BackBtn = document.getElementById('step2-back-btn');
-                if (step2BackBtn) {
-                    step2BackBtn.addEventListener('click', function() {
-                        document.getElementById('step2').style.display = 'none';
-                        document.getElementById('step1').style.display = 'block';
-                    });
-                }
-                
-                // Optimize button
-                const optimizeBtn = document.getElementById('optimize-btn');
-                if (optimizeBtn) {
-                    optimizeBtn.addEventListener('click', function() {
-                        optimizeRouteFromUI();
-                    });
-                }
-                
-                // Step 3 Back button
-                const step3BackBtn = document.getElementById('step3-back-btn');
-                if (step3BackBtn) {
-                    step3BackBtn.addEventListener('click', function() {
-                        document.getElementById('step3').style.display = 'none';
-                        document.getElementById('step2').style.display = 'block';
-                    });
-                }
-                
-                // Save route button
-                const saveRouteBtn = document.getElementById('save-route-btn');
-                if (saveRouteBtn) {
-                    saveRouteBtn.addEventListener('click', function() {
-                        saveRouteFromUI();
-                    });
-                }
-                
-                // Filter warnings checkbox
-                const filterWarningsCheckbox = document.getElementById('filter-warnings');
-                if (filterWarningsCheckbox) {
-                    filterWarningsCheckbox.addEventListener('change', function() {
-                        loadMachines();
-                    });
+            // Show/hide error message functions
+            function showError(message) {
+                const errorElement = document.getElementById('route-creation-error');
+                if (errorElement) {
+                    errorElement.textContent = message;
+                    errorElement.style.display = 'block';
                 }
             }
             
-            // Call the setup function when the page loads
-            setupModalButtons();
+            function hideError() {
+                const errorElement = document.getElementById('route-creation-error');
+                if (errorElement) {
+                    errorElement.style.display = 'none';
+                }
+            }
             
-            // Fix for validateCurrentStep function
+            // Function to validate the current step inputs
             function validateCurrentStep() {
                 if (currentStep === 1) {
                     // Use the modal selector to get the form elements
@@ -872,21 +765,6 @@
                 return true;
             }
             
-            function showError(message) {
-                const errorElement = document.getElementById('route-creation-error');
-                if (errorElement) {
-                    errorElement.textContent = message;
-                    errorElement.style.display = 'block';
-                }
-            }
-            
-            function hideError() {
-                const errorElement = document.getElementById('route-creation-error');
-                if (errorElement) {
-                    errorElement.style.display = 'none';
-                }
-            }
-            
             function loadMachines() {
                 const container = document.getElementById('machine-selection-container');
                 const showOnlyWarnings = document.getElementById('filter-warnings').checked;
@@ -900,7 +778,6 @@
                         <p>Loading machines...</p>
                     </div>
                 `;
-                console.log('test machines');
                 
                 // Fetch machines from API
                 fetch('/machines/')
@@ -913,7 +790,6 @@
                     .then(data => {
                         // Filter machines if needed
                         let machines = data;
-                        console.log(machines);
                         if (showOnlyWarnings) {
                             machines = machines.filter(machine => 
                                 machine.status === 'warning' || 
@@ -963,54 +839,6 @@
             document.getElementById('filter-warnings').addEventListener('change', function() {
                 loadMachines();
             });
-            
-            // Optimize route function
-            function optimizeRoute() {
-                if (!validateCurrentStep()) {
-                    return;
-                }
-                
-                const optimizeBtn = document.getElementById('optimize-btn');
-                const originalBtnText = optimizeBtn.innerHTML;
-                
-                // Show loading state
-                optimizeBtn.disabled = true;
-                optimizeBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Optimizing...';
-                
-                // Call optimize API
-                fetch('/routes/optimize/', {
-                    method: 'POST',
-                    headers: getHeaders(),
-                    body: JSON.stringify({
-                        machine_ids: selectedMachines
-                    })
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Network response was not ok');
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    // Store optimized data for later use
-                    optimizedRouteData = data;
-                    
-                    // Show results
-                    displayOptimizationResults(data);
-                    
-                    // Go to next step
-                    goToStep(3);
-                })
-                .catch(error => {
-                    console.error('Error optimizing route:', error);
-                    showError('Failed to optimize route. Please try again.');
-                })
-                .finally(() => {
-                    // Reset button state
-                    optimizeBtn.disabled = false;
-                    optimizeBtn.innerHTML = originalBtnText;
-                });
-            }
             
             function displayOptimizationResults(data) {
                 const resultsContainer = document.getElementById('optimization-results');
@@ -1181,121 +1009,6 @@
                 }
             }
             
-            // Redefine saveRouteFromUI to use the safer saveRoute function
-            function saveRouteFromUI() {
-                saveRoute();
-            }
-
-            // Fix for Next button functionality and other modal interactions
-            function setupModalButtons() {
-                console.log("Setting up modal buttons");
-                
-                // Step 1 Next button
-                const step1NextBtn = document.getElementById('step1-next-btn');
-                if (step1NextBtn) {
-                    step1NextBtn.addEventListener('click', function() {
-                        console.log("Next button clicked");
-                        try {
-                            const modalBody = document.querySelector('#createRouteModal .modal-body');
-                            const routeNameInput = modalBody.querySelector('#route-name');
-                            const routeDateInput = modalBody.querySelector('#route-date');
-                            const technicianInput = modalBody.querySelector('#route-technician');
-                            
-                            if (!routeNameInput) {
-                                console.error('Route name input element not found');
-                                showError('Form error: Route name field not found');
-                                return;
-                            }
-                            
-                            if (!routeDateInput) {
-                                console.error('Route date input element not found');
-                                showError('Form error: Date field not found');
-                                return;
-                            }
-                            
-                            if (!technicianInput) {
-                                console.error('Route technician input element not found');
-                                showError('Form error: Technician field not found');
-                                return;
-                            }
-                            
-                            // Now safely access the values since we've verified the elements exist
-                            const routeName = routeNameInput.value ? routeNameInput.value.trim() : '';
-                            const routeDate = routeDateInput.value || '';
-                            const technicianId = technicianInput.value || '';
-                            
-                            if (!routeName) {
-                                showError('Please enter a route name');
-                                return;
-                            }
-                            if (!routeDate) {
-                                showError('Please select a date');
-                                return;
-                            }
-                            if (!technicianId) {
-                                showError('Please select a technician');
-                                return;
-                            }
-                            
-                            hideError();
-                            document.getElementById('step1').style.display = 'none';
-                            document.getElementById('step2').style.display = 'block';
-                            loadMachines();
-                        } catch (error) {
-                            console.error('Error in step1-next-btn handler:', error);
-                            showError('An error occurred. Please try again.');
-                        }
-                    });
-                } else {
-                    console.error('Next button not found');
-                }
-                
-                // Step 2 Back button
-                const step2BackBtn = document.getElementById('step2-back-btn');
-                if (step2BackBtn) {
-                    step2BackBtn.addEventListener('click', function() {
-                        document.getElementById('step2').style.display = 'none';
-                        document.getElementById('step1').style.display = 'block';
-                    });
-                }
-                
-                // Optimize button
-                const optimizeBtn = document.getElementById('optimize-btn');
-                if (optimizeBtn) {
-                    optimizeBtn.addEventListener('click', function() {
-                        optimizeRouteFromUI();
-                    });
-                }
-                
-                // Step 3 Back button
-                const step3BackBtn = document.getElementById('step3-back-btn');
-                if (step3BackBtn) {
-                    step3BackBtn.addEventListener('click', function() {
-                        document.getElementById('step3').style.display = 'none';
-                        document.getElementById('step2').style.display = 'block';
-                    });
-                }
-                
-                // Save route button
-                const saveRouteBtn = document.getElementById('save-route-btn');
-                if (saveRouteBtn) {
-                    saveRouteBtn.addEventListener('click', function() {
-                        saveRouteFromUI();
-                    });
-                }
-                
-                // Filter warnings checkbox
-                const filterWarningsCheckbox = document.getElementById('filter-warnings');
-                if (filterWarningsCheckbox) {
-                    filterWarningsCheckbox.addEventListener('change', function() {
-                        loadMachines();
-                    });
-                }
-            }
-            
-            // Call the setup function when the page loads
-            setupModalButtons();
-            
             // Fix for modal reset when closed
             document.getElementById('createRouteModal').addEventListener('hidden.bs.modal', function() {
                 // Reset to step 1
@@ -1376,6 +1089,108 @@
             function saveRouteFromUI() {
                 saveRoute();
             }
+            
+            // Setup button event listeners with proper error handling
+            function setupModalButtons() {
+                // Step 1 Next button
+                const step1NextBtn = document.getElementById('step1-next-btn');
+                if (step1NextBtn) {
+                    step1NextBtn.addEventListener('click', function() {
+                        try {
+                            const modalBody = document.querySelector('#createRouteModal .modal-body');
+                            const routeNameInput = modalBody.querySelector('#route-name');
+                            const routeDateInput = modalBody.querySelector('#route-date');
+                            const technicianInput = modalBody.querySelector('#route-technician');
+                            
+                            if (!routeNameInput) {
+                                showError('Form error: Route name field not found');
+                                return;
+                            }
+                            
+                            if (!routeDateInput) {
+                                showError('Form error: Date field not found');
+                                return;
+                            }
+                            
+                            if (!technicianInput) {
+                                showError('Form error: Technician field not found');
+                                return;
+                            }
+                            
+                            // Now safely access the values since we've verified the elements exist
+                            const routeName = routeNameInput.value ? routeNameInput.value.trim() : '';
+                            const routeDate = routeDateInput.value || '';
+                            const technicianId = technicianInput.value || '';
+                            
+                            if (!routeName) {
+                                showError('Please enter a route name');
+                                return;
+                            }
+                            if (!routeDate) {
+                                showError('Please select a date');
+                                return;
+                            }
+                            if (!technicianId) {
+                                showError('Please select a technician');
+                                return;
+                            }
+                            
+                            hideError();
+                            document.getElementById('step1').style.display = 'none';
+                            document.getElementById('step2').style.display = 'block';
+                            loadMachines();
+                        } catch (error) {
+                            console.error('Error in step1-next-btn handler:', error);
+                            showError('An error occurred. Please try again.');
+                        }
+                    });
+                }
+                
+                // Step 2 Back button
+                const step2BackBtn = document.getElementById('step2-back-btn');
+                if (step2BackBtn) {
+                    step2BackBtn.addEventListener('click', function() {
+                        document.getElementById('step2').style.display = 'none';
+                        document.getElementById('step1').style.display = 'block';
+                    });
+                }
+                
+                // Optimize button
+                const optimizeBtn = document.getElementById('optimize-btn');
+                if (optimizeBtn) {
+                    optimizeBtn.addEventListener('click', function() {
+                        optimizeRouteFromUI();
+                    });
+                }
+                
+                // Step 3 Back button
+                const step3BackBtn = document.getElementById('step3-back-btn');
+                if (step3BackBtn) {
+                    step3BackBtn.addEventListener('click', function() {
+                        document.getElementById('step3').style.display = 'none';
+                        document.getElementById('step2').style.display = 'block';
+                    });
+                }
+                
+                // Save route button
+                const saveRouteBtn = document.getElementById('save-route-btn');
+                if (saveRouteBtn) {
+                    saveRouteBtn.addEventListener('click', function() {
+                        saveRouteFromUI();
+                    });
+                }
+                
+                // Filter warnings checkbox
+                const filterWarningsCheckbox = document.getElementById('filter-warnings');
+                if (filterWarningsCheckbox) {
+                    filterWarningsCheckbox.addEventListener('change', function() {
+                        loadMachines();
+                    });
+                }
+            }
+            
+            // Call the setup function when the page loads
+            setupModalButtons();
         });
     </script>
 </body>
