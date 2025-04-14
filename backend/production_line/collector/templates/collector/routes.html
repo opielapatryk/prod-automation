@@ -733,6 +733,18 @@
                         showError('Please select a date');
                         return false;
                     }
+                    
+                    // Check if the selected date is not in the past
+                    const selectedDate = new Date(routeDate);
+                    selectedDate.setHours(0, 0, 0, 0);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    
+                    if (selectedDate < today) {
+                        showError('Please select a date that is not in the past');
+                        return false;
+                    }
+                    
                     if (!technicianId) {
                         showError('Please select a technician');
                         return false;
@@ -1130,6 +1142,18 @@
                                 showError('Please select a date');
                                 return;
                             }
+                            
+                            // Check if the selected date is not in the past
+                            const selectedDate = new Date(routeDate);
+                            selectedDate.setHours(0, 0, 0, 0);
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0);
+                            
+                            if (selectedDate < today) {
+                                showError('Please select a date that is not in the past');
+                                return;
+                            }
+                            
                             if (!technicianId) {
                                 showError('Please select a technician');
                                 return;
