@@ -1,0 +1,6 @@
+# Automatyczne generowanie tras serwisowych
+# Uruchom codziennie o 5:00 rano (przed rozpoczęciem pracy serwisantów)
+0 5 * * * cd /Users/patrykopiela/Documents/PLC/backend/production_line && python manage.py generate_daily_routes >> /var/log/auto_route_generation.log 2>&1
+
+# Aby zainstalować ten plik crontab, wykonaj:
+# crontab /Users/patrykopiela/Documents/PLC/backend/production_line/crontab_config.txt
