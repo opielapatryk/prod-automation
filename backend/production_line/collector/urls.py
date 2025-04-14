@@ -16,4 +16,5 @@ urlpatterns = [
     path('routes/optimize/', csrf_exempt(views.optimize_route), name='api_optimize_route'),
     path('routes/create/', csrf_exempt(views.create_route), name='api_create_route'),
     path('routes/list/', csrf_exempt(views.routes_list), name='api_routes_list'),
+    path('routes/refresh/', csrf_exempt(views.refresh_routes), name='api_refresh_routes'),
 ]

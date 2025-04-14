@@ -6,7 +6,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 import json
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
@@ -680,6 +680,282 @@ def create_route(request):
             'is_delegation': route.is_delegation,
             'status': route.status
         }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+@swagger_auto_schema(
+    method='post',
+    operation_description="Refresh routes based on new warnings",
+    responses={
+        200: openapi.Response(
+            description="Routes refresh summary",
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'new_routes_created': openapi.Schema(type=openapi.TYPE_INTEGER),
+                    'routes_updated': openapi.Schema(type=openapi.TYPE_INTEGER),
+                    'message': openapi.Schema(type=openapi.TYPE_STRING),
+                }
+            )
+        ),
+        400: "Bad request"
+    }
+)
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def refresh_routes(request):
+    """
+    Odświeża trasy na podstawie nowych ostrzeżeń. Sprawdza wszystkie 
+    maszyny z ostrzeżeniami i dodaje je do istniejących tras lub tworzy nowe.
+    """
+    try:
+        # Pobierz datę z parametru lub użyj następnego dnia roboczego
+        target_date_str = request.data.get('date', None)
+        if target_date_str:
+            try:
+                target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({'error': 'Niepoprawny format daty. Użyj YYYY-MM-DD'}, 
+                               status=status.HTTP_400_BAD_REQUEST)
+        else:
+            # Użyj jutrzejszej daty
+            today = date.today()
+            target_date = today + timedelta(days=1)
+            
+            # Jeśli jutro weekend, przejdź do poniedziałku
+            if target_date.weekday() == 5:  # Sobota
+                target_date = target_date + timedelta(days=2)
+            elif target_date.weekday() == 6:  # Niedziela
+                target_date = target_date + timedelta(days=1)
+        
+        # 1. Pobierz maszyny z aktywnymi ostrzeżeniami
+        machines_with_warnings = Machine.objects.filter(
+            status__in=['warning', 'critical']
+        ).exclude(location=None)
+        
+        # Sprawdzamy, czy istnieją trasy na docelowy dzień
+        existing_routes = Route.objects.filter(
+            date=target_date, 
+            status='planned'
+        )
+        
+        new_routes = 0
+        updated_routes = 0
+        
+        # 2. Jeśli istnieją trasy na ten dzień, zaktualizuj je
+        if existing_routes.exists():
+            # Znajdź maszyny, które są już zaplanowane na istniejących trasach
+            scheduled_machines = set()
+            for route in existing_routes:
+                route_stops = RouteStop.objects.filter(route=route)
+                for stop in route_stops:
+                    scheduled_machines.add(stop.machine.id)
+            
+            # Znajdź maszyny, które nie są jeszcze zaplanowane
+            unscheduled_machines = [m for m in machines_with_warnings if m.id not in scheduled_machines]
+            
+            if unscheduled_machines:
+                # Przypisz niezaplanowane maszyny do istniejących tras wg regionów
+                for machine in unscheduled_machines:
+                    assigned = False
+                    nearest_route = None
+                    min_distance = float('inf')
+                    
+                    # Znajdź najbliższą trasę dla maszyny
+                    for route in existing_routes:
+                        route_machines = Machine.objects.filter(routestop__route=route)
+                        
+                        if route_machines.exists():
+                            # Oblicz średnią odległość od wszystkich maszyn na trasie
+                            total_distance = 0
+                            count = 0
+                            
+                            for rm in route_machines:
+                                if rm.location and machine.location:
+                                    # Oblicz odległość między maszynami (uproszczona metoda)
+                                    lat1 = float(rm.location.latitude)
+                                    lng1 = float(rm.location.longitude)
+                                    lat2 = float(machine.location.latitude)
+                                    lng2 = float(machine.location.longitude)
+                                    
+                                    # Proste obliczenie odległości (można zastąpić bardziej złożonym)
+                                    dist = ((lat1-lat2)**2 + (lng1-lng2)**2)**0.5
+                                    total_distance += dist
+                                    count += 1
+                            
+                            if count > 0:
+                                avg_distance = total_distance / count
+                                if avg_distance < min_distance:
+                                    min_distance = avg_distance
+                                    nearest_route = route
+                    
+                    # Dodaj maszynę do najbliższej trasy
+                    if nearest_route:
+                        # Znajdź najwyższy numer przystanku i dodaj nowy
+                        max_order = RouteStop.objects.filter(route=nearest_route).aggregate(
+                            max_order=models.Max('order')
+                        )['max_order'] or 0
+                        
+                        RouteStop.objects.create(
+                            route=nearest_route,
+                            machine=machine,
+                            order=max_order + 1,
+                            estimated_service_time=1.0,
+                            completed=False
+                        )
+                        
+                        # Przelicz szacowany czas trasy
+                        nearest_route.calculate_estimated_duration()
+                        updated_routes += 1
+                        assigned = True
+                    
+                    # Jeśli nie udało się przypisać, utwórz nową trasę
+                    if not assigned:
+                        # Znajdź dostępnego serwisanta z najmniejszą liczbą zaplanowanych tras
+                        technicians = User.objects.filter(is_active=True).exclude(
+                            is_staff=True, is_superuser=True
+                        )
+                        
+                        if not technicians:
+                            technicians = User.objects.filter(username='admin')
+                        
+                        if technicians:
+                            technician_routes = {}
+                            for tech in technicians:
+                                technician_routes[tech] = Route.objects.filter(
+                                    technician=tech, date=target_date
+                                ).count()
+                            
+                            # Wybierz serwisanta z najmniejszą liczbą tras
+                            selected_technician = min(
+                                technician_routes.items(), key=lambda x: x[1]
+                            )[0]
+                            
+                            # Utwórz nową trasę
+                            route = Route.objects.create(
+                                name=f"Auto-{target_date}-{new_routes+1}",
+                                technician=selected_technician,
+                                date=target_date,
+                                estimated_duration=2.0,  # Początkowa wartość
+                                start_location='Warsaw, Poland',
+                                status='planned',
+                                notes=f"Trasa utworzona automatycznie podczas odświeżania"
+                            )
+                            
+                            # Dodaj maszynę jako przystanek
+                            RouteStop.objects.create(
+                                route=route,
+                                machine=machine,
+                                order=1,
+                                estimated_service_time=1.0,
+                                completed=False
+                            )
+                            
+                            route.calculate_estimated_duration()
+                            new_routes += 1
+            else:
+                # Wszystkie maszyny z ostrzeżeniami są już zaplanowane
+                pass
+                
+        # 3. Jeśli brak tras na ten dzień, utwórz nowe
+        else:
+            # Pogrupuj maszyny wg regionów
+            machine_regions = {}
+            
+            for machine in machines_with_warnings:
+                if not machine.location:
+                    continue
+                    
+                # Prosta heurystyka grupująca wg współrzędnych
+                lat = float(machine.location.latitude)
+                lng = float(machine.location.longitude)
+                
+                # Regionalizacja (można zastąpić bardziej zaawansowaną)
+                if lat > 54:
+                    region = "Północ"
+                elif lat > 52:
+                    region = "Centrum"
+                else:
+                    region = "Południe"
+                    
+                if region not in machine_regions:
+                    machine_regions[region] = []
+                    
+                machine_regions[region].append(machine)
+            
+            # Utwórz trasy dla każdego regionu
+            technicians = User.objects.filter(is_active=True).exclude(
+                is_staff=True, is_superuser=True
+            )
+            
+            if not technicians:
+                technicians = User.objects.filter(username='admin')
+            
+            if technicians:
+                tech_index = 0
+                
+                for region, machines in machine_regions.items():
+                    if not machines:
+                        continue
+                        
+                    # Wybierz serwisanta rotacyjnie
+                    technician = technicians[tech_index % len(technicians)]
+                    tech_index += 1
+                    
+                    # Użyj API optymalizacji trasy
+                    machine_ids = [machine.id for machine in machines]
+                    
+                    try:
+                        # Bezpośrednie wywołanie funkcji to alternatywa dla zapytań HTTP
+                        # w tym przypadku bezpieczniejsza, bo działamy w ramach tego samego procesu
+                        from django.http import HttpRequest
+                        request_data = {'machine_ids': machine_ids}
+                        mock_request = HttpRequest()
+                        mock_request._body = json.dumps(request_data).encode('utf-8')
+                        mock_request.content_type = 'application/json'
+                        
+                        # Użyj istniejącej funkcji optymalizacji
+                        route_data = optimize_route(mock_request).data
+                        
+                        if route_data:
+                            # Utwórz trasę
+                            route = Route.objects.create(
+                                name=f"Auto-{region}-{target_date}",
+                                technician=technician,
+                                date=target_date,
+                                estimated_duration=route_data.get('total_duration', 4.0),
+                                start_location='Warsaw, Poland',
+                                status='planned',
+                                notes=f"Trasa utworzona automatycznie dla regionu {region}"
+                            )
+                            
+                            # Dodaj przystanki w zoptymalizowanej kolejności
+                            for idx, machine_data in enumerate(route_data.get('optimized_machines', []), 1):
+                                try:
+                                    machine = Machine.objects.get(pk=machine_data['id'])
+                                    RouteStop.objects.create(
+                                        route=route,
+                                        machine=machine,
+                                        order=idx,
+                                        estimated_service_time=machine_data.get('service_time', 1.0),
+                                        completed=False
+                                    )
+                                except Machine.DoesNotExist:
+                                    continue
+                            
+                            new_routes += 1
+                    except Exception as e:
+                        print(f"Błąd podczas optymalizacji trasy: {str(e)}")
+        
+        # Zwróć podsumowanie
+        return Response({
+            'new_routes_created': new_routes,
+            'routes_updated': updated_routes,
+            'message': f'Zaktualizowano trasy na dzień {target_date}',
+            'target_date': target_date.strftime('%Y-%m-%d')
+        })
         
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
