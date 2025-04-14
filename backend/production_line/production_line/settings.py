@@ -21,7 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ.get('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = True  # Set to True since this is a development environment
 
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'django']
 
@@ -97,8 +97,13 @@ USE_I18N = True
 USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'  # Add leading slash
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+# Add STATICFILES_DIRS to help Django find static files
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'static'),
+]
 
 # REST Framework settings
 REST_FRAMEWORK = {
