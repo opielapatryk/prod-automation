@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   django:
     build: ./backend/production_line
@@ -12,8 +10,7 @@ services:
       - SECRET_KEY=dev-key-secure-enough-for-local-dev
     depends_on:
       - postgres
-    # Zmiana polecenia na uruchomienie skryptu startowego
-    command: bash -c "chmod +x /app/docker-entrypoint.sh && /app/docker-entrypoint.sh"
+    command: bash -c "chmod +x /app/docker-entrypoint.sh && python manage.py test --failfast && /app/docker-entrypoint.sh"
   
   postgres:
     image: postgres:15

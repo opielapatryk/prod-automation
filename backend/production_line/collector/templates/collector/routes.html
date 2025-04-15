@@ -812,7 +812,7 @@
             function loadMachines() {
                 const container = document.getElementById('machine-selection-container');
                 const showOnlyWarnings = document.getElementById('filter-warnings').checked;
-                
+
                 // Show loading state
                 container.innerHTML = `
                     <div class="text-center py-4">
@@ -822,7 +822,7 @@
                         <p>Loading machines...</p>
                     </div>
                 `;
-                
+
                 // Fetch machines from API
                 fetch('/machines/')
                     .then(response => {
@@ -841,24 +841,24 @@
                                 machine.active_warnings_count > 0
                             );
                         }
-                        
+
                         // Clear container
                         container.innerHTML = '';
-                        
+
                         if (machines.length === 0) {
                             container.innerHTML = '<div class="alert alert-info">No machines match the filter criteria.</div>';
                             return;
                         }
-                        
+
                         // Build checkboxes for each machine
                         machines.forEach(machine => {
                             const machineElement = document.createElement('div');
                             machineElement.className = 'form-check mb-2';
-                            
+
                             const statusClass = machine.status === 'warning' ? 'text-warning' : 
                                                machine.status === 'critical' ? 'text-danger' : 
                                                machine.status === 'operational' ? 'text-success' : 'text-secondary';
-                            
+
                             machineElement.innerHTML = `
                                 <input class="form-check-input" type="checkbox" value="${machine.id}" id="machine-${machine.id}">
                                 <label class="form-check-label" for="machine-${machine.id}">
@@ -869,7 +869,7 @@
                                 </label>
                                 <small class="d-block text-muted">${machine.location ? machine.location.address || 'No address' : 'No location'}</small>
                             `;
-                            
+
                             container.appendChild(machineElement);
                         });
                     })

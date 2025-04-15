@@ -2,6 +2,7 @@ from django.test import TestCase
 from django.db import connections
 from django.db.utils import OperationalError
 import psycopg2
+from .models import Machine
 
 class PostgreSQLConnectionTestCase(TestCase):
     """Test cases for PostgreSQL database connection."""
@@ -43,3 +44,28 @@ class PostgreSQLConnectionTestCase(TestCase):
             
         except (Exception, psycopg2.Error) as error:
             self.fail(f"Error connecting to PostgreSQL: {error}")
+
+class MachineCreationTestCase(TestCase):
+    def setUp(self):
+        # Set up any initial data if needed
+        pass
+
+    def test_machine_creation(self):
+        # Create a machine instance with all required fields
+        machine = Machine.objects.create(
+            name="Test Machine",
+            status="operational",
+            installation_date="2025-04-15",  # Required field
+            serial_number="SN12345",  # Added unique serial number
+            model="Model X",  # Added model
+            manufacturer="Manufacturer Y"  # Added manufacturer
+        )
+
+        # Assert that the machine was created successfully
+        self.assertIsNotNone(machine.id)
+        self.assertEqual(machine.name, "Test Machine")
+        self.assertEqual(machine.status, "operational")
+        self.assertEqual(machine.installation_date, "2025-04-15")
+        self.assertEqual(machine.serial_number, "SN12345")
+        self.assertEqual(machine.model, "Model X")
+        self.assertEqual(machine.manufacturer, "Manufacturer Y")

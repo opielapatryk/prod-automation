@@ -100,11 +100,6 @@ USE_TZ = True
 STATIC_URL = '/static/'  # Add leading slash
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
-# Add STATICFILES_DIRS to help Django find static files
-STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'static'),
-]
-
 # REST Framework settings
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
