@@ -2,7 +2,8 @@ from django.test import TestCase
 from django.db import connections
 from django.db.utils import OperationalError
 import psycopg2
-from .models import Machine
+from .models import Machine, Warning, Telemetry, WarningRule
+from django.contrib.auth.models import User
 
 class PostgreSQLConnectionTestCase(TestCase):
     """Test cases for PostgreSQL database connection."""
@@ -69,3 +70,76 @@ class MachineCreationTestCase(TestCase):
         self.assertEqual(machine.serial_number, "SN12345")
         self.assertEqual(machine.model, "Model X")
         self.assertEqual(machine.manufacturer, "Manufacturer Y")
+
+class WarningModelTestCase(TestCase):
+    def setUp(self):
+        # Create a user for testing
+        self.user = User.objects.create_user(username="testuser", password="password")
+
+        # Create a machine for testing
+        self.machine = Machine.objects.create(
+            name="Test Machine",
+            serial_number="SN12345",
+            model="Model X",
+            manufacturer="Manufacturer Y",
+            status="operational",
+            installation_date="2025-04-01"
+        )
+
+        # Create a warning rule for testing
+        self.warning_rule = WarningRule.objects.create(
+            name="High Temperature",
+            parameter="temperature",
+            comparison_operator=">",
+            threshold_value=80.0,
+            severity="high",
+            created_by=self.user
+        )
+
+        # Create telemetry data for testing
+        self.telemetry = Telemetry.objects.create(
+            machine=self.machine,
+            parameter="temperature",
+            value=85.0
+        )
+
+    def test_warning_creation(self):
+        # Create a warning based on the telemetry and rule
+        warning = Warning.objects.create(
+            machine=self.machine,
+            rule=self.warning_rule,
+            telemetry=self.telemetry,
+            description="Temperature exceeded threshold."
+        )
+
+        # Assert the warning was created correctly
+        self.assertEqual(warning.machine, self.machine)
+        self.assertEqual(warning.rule, self.warning_rule)
+        self.assertEqual(warning.telemetry, self.telemetry)
+        self.assertEqual(warning.description, "Temperature exceeded threshold.")
+        self.assertTrue(warning.is_active)
+
+class TelemetryModelTestCase(TestCase):
+    def setUp(self):
+        # Create a machine for testing
+        self.machine = Machine.objects.create(
+            name="Test Machine",
+            serial_number="SN12345",
+            model="Model X",
+            manufacturer="Manufacturer Y",
+            status="operational",
+            installation_date="2025-04-01"
+        )
+
+    def test_telemetry_creation(self):
+        # Create telemetry data
+        telemetry = Telemetry.objects.create(
+            machine=self.machine,
+            parameter="temperature",
+            value=75.0
+        )
+
+        # Assert the telemetry data was created correctly
+        self.assertEqual(telemetry.machine, self.machine)
+        self.assertEqual(telemetry.parameter, "temperature")
+        self.assertEqual(telemetry.value, 75.0)
