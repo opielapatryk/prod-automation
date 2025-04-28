@@ -1,0 +1,1330 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Production Line Monitoring - Service Routes</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css">
+    <style>
+        #map { 
+            height: 500px; 
+            width: 100%;
+        }
+        .status-operational { background-color: #28a745; }
+        .status-warning { background-color: #ffc107; }
+        .status-critical { background-color: #dc3545; }
+        .status-offline { background-color: #6c757d; }
+        .status-maintenance { background-color: #17a2b8; }
+        .route-card { margin-bottom: 20px; }
+        .delegation-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 1em;
+        }
+        .route-info-panel {
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .stop-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .stop-item {
+            padding: 10px;
+            margin-bottom: 5px;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+        }
+        .stop-item.completed {
+            border-left-color: #28a745;
+            background-color: rgba(40, 167, 69, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">Production Line Monitoring</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'dashboard' %}">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'machine_map' %}">Map View</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{% url 'routes' %}">Routes</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/admin/">Admin</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <h1 class="display-4">Service Routes</h1>
+                <p class="lead">Plan and monitor technician service routes</p>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Route Filters</h5>
+                        <div>
+                            <button type="button" id="refresh-routes-btn" class="btn btn-light btn-sm me-2">
+                                <i class="bi bi-arrow-clockwise"></i> Refresh Routes
+                            </button>
+                            <button type="button" id="update-routes-warnings-btn" class="btn btn-warning btn-sm me-2">
+                                <i class="bi bi-exclamation-triangle"></i> Check For New Warnings
+                            </button>
+                            <button type="button" class="btn btn-light btn-sm" data-bs-toggle="modal" data-bs-target="#createRouteModal">
+                                Create Optimized Route
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form method="get" class="row g-3">
+                            <div class="col-md-4">
+                                <label for="technician" class="form-label">Technician</label>
+                                <select name="technician" id="technician" class="form-select">
+                                    <option value="">All Technicians</option>
+                                    {% for tech in technicians %}
+                                    <option value="{{ tech.id }}" {% if request.GET.technician == tech.id|stringformat:"i" %}selected{% endif %}>
+                                        {% if tech.first_name %}{{ tech.first_name }} {{ tech.last_name }}{% else %}{{ tech.username }}{% endif %}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="date" class="form-label">Date</label>
+                                <input type="date" name="date" id="date" class="form-control" value="{{ request.GET.date|default:'' }}">
+                            </div>
+                            <div class="col-md-4 d-flex align-items-end">
+                                <button type="submit" class="btn btn-primary me-2">Filter</button>
+                                <a href="{% url 'routes' %}" class="btn btn-outline-secondary">Reset</a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-4">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h2>Routes</h2>
+                    <div id="refresh-spinner" class="spinner-border spinner-border-sm text-primary" role="status" style="display: none;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+                <div class="list-group mb-4" id="routes-list">
+                    {% for route in routes %}
+                    <a href="#" class="list-group-item list-group-item-action position-relative route-item" data-route-id="{{ route.id }}">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h5 class="mb-1">{{ route.name }}</h5>
+                            <small>{{ route.date }}</small>
+                        </div>
+                        <p class="mb-1">
+                            Technician: 
+                            {% if route.technician.first_name %}
+                                {{ route.technician.first_name }} {{ route.technician.last_name }}
+                            {% else %}
+                                {{ route.technician.username }}
+                            {% endif %}
+                        </p>
+                        <small>
+                            Status: <span class="badge bg-{% if route.status == 'planned' %}info{% elif route.status == 'in_progress' %}warning{% elif route.status == 'completed' %}success{% else %}secondary{% endif %}">
+                                {{ route.get_status_display }}
+                            </span>
+                        </small>
+                        <small>Estimated time: {{ route.estimated_duration|floatformat:1 }} hours</small>
+                        {% if route.is_delegation %}
+                            <span class="badge bg-dark delegation-badge">Business Trip</span>
+                        {% endif %}
+                    </a>
+                    {% empty %}
+                    <div class="list-group-item">
+                        No routes found with the selected filters.
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div class="col-md-8">
+                <div id="route-details-container">
+                    <div class="text-center py-5" id="route-placeholder">
+                        <h3 class="text-muted">Select a route to view details</h3>
+                        <p>Route information and map will be displayed here</p>
+                    </div>
+                    
+                    <div id="route-details" style="display:none;">
+                        <div class="route-info-panel">
+                            <h3 id="route-name"></h3>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <p>
+                                        <strong>Technician:</strong> <span id="route-technician"></span><br>
+                                        <strong>Date:</strong> <span id="route-date"></span><br>
+                                        <strong>Status:</strong> <span id="route-status"></span>
+                                    </p>
+                                </div>
+                                <div class="col-md-6">
+                                    <p>
+                                        <strong>Start Location:</strong> <span id="route-start-location"></span><br>
+                                        <strong>Estimated Duration:</strong> <span id="route-duration"></span> hours<br>
+                                        <strong>Type:</strong> <span id="route-type"></span>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="map" class="mb-4"></div>
+                        
+                        <h4>Route Stops</h4>
+                        <div class="stop-list" id="stop-list">
+                            <!-- Stops will be populated here by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for creating a new optimized route -->
+    <div class="modal fade" id="createRouteModal" tabindex="-1" aria-labelledby="createRouteModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createRouteModalLabel">Create Optimized Route</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="route-creation-error" class="alert alert-danger" style="display: none;"></div>
+                    
+                    <!-- Step 1: Route details -->
+                    <div id="step1" class="create-route-step">
+                        <h4>Step 1: Route Details</h4>
+                        <div class="mb-3">
+                            <label for="route-name" class="form-label">Route Name</label>
+                            <input type="text" class="form-control" id="route-name" placeholder="Enter route name">
+                        </div>
+                        <div class="mb-3">
+                            <label for="route-date" class="form-label">Date</label>
+                            <input type="date" class="form-control" id="route-date">
+                        </div>
+                        <div class="mb-3">
+                            <label for="route-technician" class="form-label">Technician</label>
+                            <select class="form-select" id="route-technician">
+                                <option value="">Select technician</option>
+                                {% for tech in technicians %}
+                                <option value="{{ tech.id }}">
+                                    {% if tech.first_name %}{{ tech.first_name }} {{ tech.last_name }}{% else %}{{ tech.username }}{% endif %}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button class="btn btn-primary" id="step1-next-btn">Next</button>
+                    </div>
+                    
+                    <!-- Step 2: Select machines -->
+                    <div id="step2" class="create-route-step" style="display: none;">
+                        <h4>Step 2: Select Machines to Service</h4>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="filter-warnings">
+                                <label class="form-check-label" for="filter-warnings">
+                                    Show only machines with active warnings
+                                </label>
+                            </div>
+                        </div>
+                        <div id="machine-selection-container" class="mb-3" style="max-height: 300px; overflow-y: auto;">
+                            <!-- Machine checkboxes will be loaded via AJAX -->
+                            <div class="text-center py-4">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p>Loading machines...</p>
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <button class="btn btn-secondary" id="step2-back-btn">Back</button>
+                            <button class="btn btn-primary" id="optimize-btn">Optimize Route</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Step 3: Review optimized route -->
+                    <div id="step3" class="create-route-step" style="display: none;">
+                        <h4>Step 3: Review Optimized Route</h4>
+                        <div id="optimization-results">
+                            <!-- Results will be shown here -->
+                        </div>
+                        <div class="d-flex justify-content-between mt-3">
+                            <button class="btn btn-secondary" id="step3-back-btn">Back</button>
+                            <button class="btn btn-success" id="save-route-btn">Save Route</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for updating routes with new warnings -->
+    <div class="modal fade" id="updateRoutesModal" tabindex="-1" aria-labelledby="updateRoutesModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="updateRoutesModalLabel">Refresh Routes with New Warnings</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>This will check for new warnings and update routes to include machines with issues.</p>
+                    <div class="mb-3">
+                        <label for="update-routes-date" class="form-label">Target Date</label>
+                        <input type="date" class="form-control" id="update-routes-date">
+                        <small class="text-muted">If not selected, will use next working day</small>
+                    </div>
+                    <div id="update-routes-result" class="alert alert-info" style="display: none;"></div>
+                    <div id="update-routes-error" class="alert alert-danger" style="display: none;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="confirm-update-routes-btn">
+                        <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true" id="update-routes-spinner"></span>
+                        Update Routes
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Function to get CSRF token - make sure this is at the top
+            function getCookie(name) {
+                let cookieValue = null;
+                if (document.cookie && document.cookie !== '') {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i].trim();
+                        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                            break;
+                        }
+                    }
+                }
+                return cookieValue;
+            }
+
+            // CSRF headers for fetch requests
+            function getHeaders() {
+                return {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'X-Requested-With': 'XMLHttpRequest' // This helps Django identify AJAX requests
+                };
+            }
+
+            let map = null;
+            let routeMarkers = [];
+            let routePolyline = null;
+            
+            // Headquarters location (Warsaw)
+            const headquarters = {
+                name: "Headquarters",
+                lat: 52.2297,
+                lng: 21.0122,
+                address: "{{ headquarters }}"
+            };
+            
+            // Status color mapping
+            const statusColors = {
+                'operational': '#28a745',
+                'warning': '#ffc107',
+                'critical': '#dc3545',
+                'offline': '#6c757d',
+                'maintenance': '#17a2b8'
+            };
+
+            // Handle route item clicks
+            document.querySelectorAll('.route-item').forEach(item => {
+                item.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    
+                    // Highlight selected route
+                    document.querySelectorAll('.route-item').forEach(el => {
+                        el.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                    
+                    // Get route details
+                    const routeId = this.getAttribute('data-route-id');
+                    fetchRouteDetails(routeId);
+                });
+            });
+            
+            // Fetch route details from API
+            function fetchRouteDetails(routeId) {
+                fetch(`/routes/${routeId}/`)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        displayRouteDetails(data);
+                    })
+                    .catch(error => {
+                        console.error('Error fetching route details:', error);
+                        alert('Could not load route details');
+                    });
+            }
+            
+            // Display route details in the UI
+            function displayRouteDetails(route) {
+                // Show details panel, hide placeholder
+                document.getElementById('route-placeholder').style.display = 'none';
+                document.getElementById('route-details').style.display = 'block';
+                
+                // Populate route info
+                document.getElementById('route-name').textContent = route.name;
+                document.getElementById('route-technician').textContent = route.technician.name;
+                document.getElementById('route-date').textContent = route.date;
+                
+                const statusBadge = `<span class="badge bg-${getStatusBadgeColor(route.status)}">${getStatusDisplay(route.status)}</span>`;
+                document.getElementById('route-status').innerHTML = statusBadge;
+                
+                document.getElementById('route-start-location').textContent = route.start_location;
+                document.getElementById('route-duration').textContent = route.estimated_duration.toFixed(1);
+                
+                const routeType = route.is_delegation ? 
+                    '<span class="badge bg-dark">Business Trip</span>' : 
+                    '<span class="badge bg-success">Regular Route</span>';
+                document.getElementById('route-type').innerHTML = routeType;
+                
+                // Populate stops list
+                const stopList = document.getElementById('stop-list');
+                stopList.innerHTML = '';
+                
+                // Add stops to the list
+                route.stops.forEach(stop => {
+                    const stopItem = document.createElement('div');
+                    stopItem.className = `stop-item ${stop.completed ? 'completed' : ''}`;
+                    
+                    stopItem.innerHTML = `
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h5 class="mb-1">${stop.order}. ${stop.machine_name}</h5>
+                            <span class="badge status-${stop.status}" style="background-color: ${statusColors[stop.status]}">
+                                ${getStatusDisplay(stop.status)}
+                            </span>
+                        </div>
+                        <p class="mb-1">
+                            <strong>Model:</strong> ${stop.model}<br>
+                            <strong>Address:</strong> ${stop.address || 'No address'}<br>
+                            <strong>Service time:</strong> ${stop.service_time.toFixed(1)} hours
+                        </p>
+                        <small>
+                            ${stop.warnings_count > 0 ? `<span class="badge bg-danger">${stop.warnings_count} warnings</span>` : ''}
+                            ${stop.completed ? '<span class="badge bg-success">Completed</span>' : ''}
+                        </small>
+                    `;
+                    
+                    stopList.appendChild(stopItem);
+                });
+                
+                // Initialize or update map
+                initializeOrUpdateMap(route);
+            }
+            
+            // Initialize or update the route map
+            function initializeOrUpdateMap(route) {
+                // If map not initialized, create it
+                if (!map) {
+                    map = L.map('map').setView([headquarters.lat, headquarters.lng], 7);
+                    
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        maxZoom: 19,
+                        attribution: '© OpenStreetMap contributors'
+                    }).addTo(map);
+                }
+                
+                // Clear existing markers and polyline
+                routeMarkers.forEach(marker => map.removeLayer(marker));
+                routeMarkers = [];
+                if (routePolyline) map.removeLayer(routePolyline);
+                
+                // Add headquarters marker - special icon for basecamp
+                const hqIcon = L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div style="background-color: #007bff; width: 24px; height: 24px; border-radius: 12px; border: 2px solid white; text-align: center; color: white; font-weight: bold;"><i class="bi bi-house-fill"></i></div>`,
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                });
+                
+                const hqMarker = L.marker([headquarters.lat, headquarters.lng], {
+                    icon: hqIcon
+                }).addTo(map);
+                
+                hqMarker.bindPopup(`<strong>Headquarters/Basecamp</strong><br>${headquarters.address}`);
+                routeMarkers.push(hqMarker);
+                
+                // Create route coordinates array - always start with HQ
+                const routeCoordinates = [[headquarters.lat, headquarters.lng]];
+                
+                // Add stop markers in order
+                if (route.stops && route.stops.length > 0) {
+                    // Sort stops by order field to ensure correct sequence
+                    const orderedStops = [...route.stops].sort((a, b) => a.order - b.order);
+                    
+                    orderedStops.forEach((stop, index) => {
+                        if (!stop.lat || !stop.lng) return;
+                        
+                        const customIcon = L.divIcon({
+                            className: 'custom-div-icon',
+                            html: `<div style="background-color: ${statusColors[stop.status]}; width: 20px; height: 20px; border-radius: 10px; border: 2px solid white; text-align: center; line-height: 16px; font-weight: bold; color: white;">${stop.order}</div>`,
+                            iconSize: [20, 20],
+                            iconAnchor: [10, 10]
+                        });
+                        
+                        const marker = L.marker([stop.lat, stop.lng], {
+                            icon: customIcon
+                        }).addTo(map);
+                        
+                        marker.bindPopup(`
+                            <strong>Stop ${stop.order}: ${stop.machine_name}</strong><br>
+                            Status: ${getStatusDisplay(stop.status)}<br>
+                            Model: ${stop.model}<br>
+                            Address: ${stop.address || 'No address'}<br>
+                            Warnings: ${stop.warnings_count}
+                        `);
+                        
+                        routeMarkers.push(marker);
+                        routeCoordinates.push([stop.lat, stop.lng]);
+                    });
+                }
+                
+                // Always add return to headquarters as final leg - complete the loop
+                routeCoordinates.push([headquarters.lat, headquarters.lng]);
+                
+                // Create the complete route polyline - circular route
+                routePolyline = L.polyline(routeCoordinates, {
+                    color: 'blue',
+                    weight: 3,
+                    opacity: 0.7
+                }).addTo(map);
+                
+                // Add directional arrows to indicate route direction
+                try {
+                    // Add arrow decorations if the library is loaded
+                    if (typeof L.polylineDecorator !== 'undefined') {
+                        const decorator = L.polylineDecorator(routePolyline, {
+                            patterns: [
+                                {offset: '5%', repeat: '10%', symbol: L.Symbol.arrowHead({
+                                    pixelSize: 10, polygon: false, pathOptions: {stroke: true, color: '#007bff', weight: 3}
+                                })}
+                            ]
+                        }).addTo(map);
+                    }
+                } catch (e) {
+                    console.log('Polyline decorator not available:', e);
+                }
+                
+                // Fit map to show all markers
+                if (routeCoordinates.length > 1) {
+                    const bounds = L.latLngBounds(routeCoordinates);
+                    map.fitBounds(bounds.pad(0.1));
+                }
+            }
+            
+            // Helper function to get badge color for status
+            function getStatusBadgeColor(status) {
+                switch (status) {
+                    case 'planned': return 'info';
+                    case 'in_progress': return 'warning';
+                    case 'completed': return 'success';
+                    case 'cancelled': return 'secondary';
+                    default: return 'secondary';
+                }
+            }
+            
+            // Helper function to get display text for status
+            function getStatusDisplay(status) {
+                switch (status) {
+                    case 'planned': return 'Planned';
+                    case 'in_progress': return 'In Progress';
+                    case 'completed': return 'Completed';
+                    case 'cancelled': return 'Cancelled';
+                    case 'operational': return 'Operational';
+                    case 'warning': return 'Warning';
+                    case 'critical': return 'Critical';
+                    case 'offline': return 'Offline';
+                    case 'maintenance': return 'Maintenance';
+                    default: return status.charAt(0).toUpperCase() + status.slice(1);
+                }
+            }
+
+            // Add event listener for the refresh button
+            document.getElementById('refresh-routes-btn').addEventListener('click', refreshRoutes);
+            
+            // Function to refresh routes without reloading the page
+            function refreshRoutes() {
+                // Show spinner
+                const spinner = document.getElementById('refresh-spinner');
+                spinner.style.display = 'block';
+                
+                // Get current filter values
+                const technicianId = document.getElementById('technician').value;
+                const dateFilter = document.getElementById('date').value;
+                
+                // Build query string
+                let queryString = '';
+                if (technicianId) {
+                    queryString += `technician=${technicianId}`;
+                }
+                if (dateFilter) {
+                    if (queryString) queryString += '&';
+                    queryString += `date=${dateFilter}`;
+                }
+                
+                // Fetch updated routes data
+                fetch(`/routes/list/?${queryString}`)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        updateRoutesList(data);
+                    })
+                    .catch(error => {
+                        console.error('Error refreshing routes:', error);
+                        alert('Could not refresh routes data');
+                    })
+                    .finally(() => {
+                        // Hide spinner
+                        spinner.style.display = 'none';
+                    });
+            }
+            
+            // Function to update routes list in UI
+            function updateRoutesList(routes) {
+                const routesList = document.getElementById('routes-list');
+                
+                // Clear current content
+                routesList.innerHTML = '';
+                
+                if (routes.length === 0) {
+                    routesList.innerHTML = `
+                        <div class="list-group-item">
+                            No routes found with the selected filters.
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Add routes to the list
+                routes.forEach(route => {
+                    const routeElement = document.createElement('a');
+                    routeElement.href = '#';
+                    routeElement.className = 'list-group-item list-group-item-action position-relative route-item';
+                    routeElement.setAttribute('data-route-id', route.id);
+                    
+                    const technicianName = route.technician.first_name && route.technician.last_name ? 
+                        `${route.technician.first_name} ${route.technician.last_name}` : 
+                        route.technician.username;
+                    
+                    let statusBadgeClass = 'secondary';
+                    switch(route.status) {
+                        case 'planned': statusBadgeClass = 'info'; break;
+                        case 'in_progress': statusBadgeClass = 'warning'; break;
+                        case 'completed': statusBadgeClass = 'success'; break;
+                        case 'cancelled': statusBadgeClass = 'secondary'; break;
+                    }
+                    
+                    routeElement.innerHTML = `
+                        <div class="d-flex w-100 justify-content-between">
+                            <h5 class="mb-1">${route.name}</h5>
+                            <small>${route.date}</small>
+                        </div>
+                        <p class="mb-1">Technician: ${technicianName}</p>
+                        <small>
+                            Status: <span class="badge bg-${statusBadgeClass}">
+                                ${getStatusDisplay(route.status)}
+                            </span>
+                        </small>
+                        <small>Estimated time: ${parseFloat(route.estimated_duration).toFixed(1)} hours</small>
+                        ${route.is_delegation ? '<span class="badge bg-dark delegation-badge">Business Trip</span>' : ''}
+                    `;
+                    
+                    routesList.appendChild(routeElement);
+                    
+                    // Add click event to the new route element
+                    routeElement.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        
+                        // Highlight selected route
+                        document.querySelectorAll('.route-item').forEach(el => {
+                            el.classList.remove('active');
+                        });
+                        this.classList.add('active');
+                        
+                        // Get route details
+                        const routeId = this.getAttribute('data-route-id');
+                        fetchRouteDetails(routeId);
+                    });
+                });
+            }
+
+            // Variables for route creation
+            let currentStep = 1;
+            let selectedMachines = [];
+            let optimizedRouteData = null;
+            
+            // Step navigation functions
+            function goToStep(step) {
+                // Validate current step before proceeding
+                if (step > currentStep && !validateCurrentStep()) {
+                    return false;
+                }
+                
+                // Hide all steps
+                document.querySelectorAll('.create-route-step').forEach(el => {
+                    el.style.display = 'none';
+                });
+                
+                // Show the requested step
+                document.getElementById('step' + step).style.display = 'block';
+                currentStep = step;
+                
+                // If going to step 2, load machines
+                if (step === 2) {
+                    loadMachines();
+                }
+                
+                return true;
+            }
+            
+            // Show/hide error message functions
+            function showError(message) {
+                const errorElement = document.getElementById('route-creation-error');
+                if (errorElement) {
+                    errorElement.textContent = message;
+                    errorElement.style.display = 'block';
+                }
+            }
+            
+            function hideError() {
+                const errorElement = document.getElementById('route-creation-error');
+                if (errorElement) {
+                    errorElement.style.display = 'none';
+                }
+            }
+            
+            // Function to validate the current step inputs
+            function validateCurrentStep() {
+                if (currentStep === 1) {
+                    // Use the modal selector to get the form elements
+                    const modalBody = document.querySelector('#createRouteModal .modal-body');
+                    const routeNameInput = modalBody.querySelector('#route-name');
+                    const routeDateInput = modalBody.querySelector('#route-date');
+                    const routeTechnicianInput = modalBody.querySelector('#route-technician');
+                    
+                    if (!routeNameInput || !routeDateInput || !routeTechnicianInput) {
+                        console.error('Required form elements not found');
+                        return false;
+                    }
+                    
+                    const routeName = routeNameInput.value ? routeNameInput.value.trim() : '';
+                    const routeDate = routeDateInput.value || '';
+                    const technicianId = routeTechnicianInput.value || '';
+                    
+                    if (!routeName) {
+                        showError('Please enter a route name');
+                        return false;
+                    }
+                    if (!routeDate) {
+                        showError('Please select a date');
+                        return false;
+                    }
+                    
+                    // Check if the selected date is not in the past
+                    const selectedDate = new Date(routeDate);
+                    selectedDate.setHours(0, 0, 0, 0);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    
+                    if (selectedDate < today) {
+                        showError('Please select a date that is not in the past');
+                        return false;
+                    }
+                    
+                    if (!technicianId) {
+                        showError('Please select a technician');
+                        return false;
+                    }
+                    
+                    hideError();
+                    return true;
+                }
+                
+                if (currentStep === 2) {
+                    // Get all checked machine checkboxes
+                    const checkedMachines = document.querySelectorAll('#machine-selection-container input[type="checkbox"]:checked');
+                    
+                    if (checkedMachines.length < 2) {
+                        showError('Please select at least 2 machines to create a route');
+                        return false;
+                    }
+                    
+                    hideError();
+                    
+                    // Store selected machine IDs
+                    selectedMachines = [];
+                    checkedMachines.forEach(checkbox => {
+                        selectedMachines.push(parseInt(checkbox.value));
+                    });
+                    
+                    return true;
+                }
+                
+                return true;
+            }
+            
+            function loadMachines() {
+                const container = document.getElementById('machine-selection-container');
+                const showOnlyWarnings = document.getElementById('filter-warnings').checked;
+
+                // Show loading state
+                container.innerHTML = `
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p>Loading machines...</p>
+                    </div>
+                `;
+
+                // Fetch machines from API
+                fetch('/machines/')
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        // Filter machines if needed
+                        let machines = data;
+                        if (showOnlyWarnings) {
+                            machines = machines.filter(machine => 
+                                machine.status === 'warning' || 
+                                machine.status === 'critical' || 
+                                machine.active_warnings_count > 0
+                            );
+                        }
+
+                        // Clear container
+                        container.innerHTML = '';
+
+                        if (machines.length === 0) {
+                            container.innerHTML = '<div class="alert alert-info">No machines match the filter criteria.</div>';
+                            return;
+                        }
+
+                        // Build checkboxes for each machine
+                        machines.forEach(machine => {
+                            const machineElement = document.createElement('div');
+                            machineElement.className = 'form-check mb-2';
+
+                            const statusClass = machine.status === 'warning' ? 'text-warning' : 
+                                               machine.status === 'critical' ? 'text-danger' : 
+                                               machine.status === 'operational' ? 'text-success' : 'text-secondary';
+
+                            machineElement.innerHTML = `
+                                <input class="form-check-input" type="checkbox" value="${machine.id}" id="machine-${machine.id}">
+                                <label class="form-check-label" for="machine-${machine.id}">
+                                    ${machine.name} - ${machine.model}
+                                    <span class="${statusClass}">(${machine.status})</span>
+                                    ${machine.active_warnings_count > 0 ? 
+                                     `<span class="badge bg-danger">${machine.active_warnings_count}</span>` : ''}
+                                </label>
+                                <small class="d-block text-muted">${machine.location ? machine.location.address || 'No address' : 'No location'}</small>
+                            `;
+
+                            container.appendChild(machineElement);
+                        });
+                    })
+                    .catch(error => {
+                        console.error('Error loading machines:', error);
+                        container.innerHTML = '<div class="alert alert-danger">Failed to load machines. Please try again.</div>';
+                    });
+            }
+            
+            // Filter warnings checkbox listener
+            document.getElementById('filter-warnings').addEventListener('change', function() {
+                loadMachines();
+            });
+            
+            function displayOptimizationResults(data) {
+                const resultsContainer = document.getElementById('optimization-results');
+                
+                const machinesList = data.optimized_machines.map((machine, index) => `
+                    <li class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>${index + 1}. ${machine.name}</strong>
+                                <div><small>${machine.address}</small></div>
+                            </div>
+                            <div class="text-end">
+                                <div><span class="badge bg-info">${machine.travel_distance_from_previous} km</span></div>
+                                <small class="text-muted">
+                                    From: ${machine.previous_location || 'Headquarters'}<br>
+                                    Travel: ${machine.travel_time_from_previous.toFixed(1)} h
+                                </small>
+                            </div>
+                        </div>
+                    </li>
+                `).join('');
+                
+                resultsContainer.innerHTML = `
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <h5 class="card-title">Route Summary</h5>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <p><strong>Total Distance:</strong> ${data.total_distance} km</p>
+                                    <p><strong>Total Duration:</strong> ${data.formatted_duration || data.total_duration.toFixed(1) + " hours"}</p>
+                                </div>
+                                <div class="col-md-6">
+                                    <p><strong>Return Trip:</strong> ${data.return_distance} km (${data.return_time.toFixed(1)} h)</p>
+                                    <p><strong>Route Type:</strong> ${data.is_delegation ? 
+                                        '<span class="badge bg-dark">Business Trip</span>' : 
+                                        '<span class="badge bg-success">Regular Route</span>'}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header bg-primary text-white">
+                            <i class="bi bi-arrow-repeat"></i> Complete Route (Starting and Ending at Headquarters)
+                        </div>
+                        <ul class="list-group list-group-flush">
+                            <li class="list-group-item bg-light">
+                                <strong><i class="bi bi-house-door"></i> Start: Headquarters/Basecamp</strong>
+                                <div><small>${data.headquarters.address}</small></div>
+                            </li>
+                            ${machinesList}
+                            <li class="list-group-item bg-light">
+                                <strong><i class="bi bi-house-door"></i> Return: Headquarters/Basecamp</strong>
+                                <div>
+                                    <small>${data.headquarters.address}</small><br>
+                                    <span class="badge bg-info">${data.return_distance} km</span>
+                                    <small class="text-muted">from ${data.optimized_machines[data.optimized_machines.length-1].name}</small>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            // Save route function
+            function saveRoute() {
+                try {
+                    if (!optimizedRouteData) {
+                        showError('No optimized route data available');
+                        return;
+                    }
+                    
+                    // Use the modal selector to get the form elements
+                    const modalBody = document.querySelector('#createRouteModal .modal-body');
+                    const routeNameInput = modalBody.querySelector('#route-name');
+                    const routeDateInput = modalBody.querySelector('#route-date');
+                    const routeTechnicianInput = modalBody.querySelector('#route-technician');
+                    
+                    if (!routeNameInput || !routeDateInput || !routeTechnicianInput) {
+                        showError('Form error: Required form fields not found');
+                        return;
+                    }
+                    
+                    // Safely access the values
+                    const routeName = routeNameInput.value ? routeNameInput.value.trim() : '';
+                    const routeDate = routeDateInput.value || '';
+                    const technicianId = routeTechnicianInput.value || '';
+                    
+                    if (!routeName || !routeDate || !technicianId) {
+                        showError('Missing required route information');
+                        return;
+                    }
+                    
+                    // Prepare route data
+                    const routeData = {
+                        name: routeName,
+                        date: routeDate,
+                        technician_id: technicianId,
+                        estimated_duration: optimizedRouteData.total_duration,
+                        start_location: optimizedRouteData.headquarters.address,
+                        machines: optimizedRouteData.optimized_machines.map((machine, index) => ({
+                            machine_id: machine.id,
+                            order: index + 1,
+                            estimated_service_time: machine.service_time
+                        }))
+                    };
+                    
+                    // Call create route API
+                    fetch('/routes/create/', {
+                        method: 'POST',
+                        headers: getHeaders(),
+                        body: JSON.stringify(routeData)
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            return response.json().then(data => {
+                                throw new Error(data.error || 'Failed to create route');
+                            });
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        // Hide modal
+                        const modal = bootstrap.Modal.getInstance(document.getElementById('createRouteModal'));
+                        if (modal) {
+                            modal.hide();
+                        } else {
+                            // If modal instance can't be found, just hide it manually
+                            const modalElement = document.getElementById('createRouteModal');
+                            if (modalElement) {
+                                modalElement.classList.remove('show');
+                                modalElement.style.display = 'none';
+                                document.body.classList.remove('modal-open');
+                                const modalBackdrops = document.querySelectorAll('.modal-backdrop');
+                                modalBackdrops.forEach(backdrop => backdrop.remove());
+                            }
+                        }
+                        
+                        // Reset form
+                        if (routeNameInput) routeNameInput.value = '';
+                        if (routeDateInput) routeDateInput.value = '';
+                        if (routeTechnicianInput) routeTechnicianInput.value = '';
+                        selectedMachines = [];
+                        optimizedRouteData = null;
+                        
+                        // Reset step display
+                        const step1Element = document.getElementById('step1');
+                        const step2Element = document.getElementById('step2');
+                        const step3Element = document.getElementById('step3');
+                        
+                        if (step1Element) step1Element.style.display = 'block';
+                        if (step2Element) step2Element.style.display = 'none';
+                        if (step3Element) step3Element.style.display = 'none';
+                        
+                        // Show success message
+                        alert('Route created successfully!');
+                        
+                        // Refresh routes list
+                        refreshRoutes();
+                    })
+                    .catch(error => {
+                        console.error('Error saving route:', error);
+                        showError(error.message || 'Failed to save route. Please try again.');
+                    });
+                } catch (error) {
+                    console.error('Error in saveRoute function:', error);
+                    showError('An error occurred while saving the route');
+                }
+            }
+            
+            // Fix for modal reset when closed
+            document.getElementById('createRouteModal').addEventListener('hidden.bs.modal', function() {
+                // Reset to step 1
+                document.getElementById('step1').style.display = 'block';
+                document.getElementById('step2').style.display = 'none';
+                document.getElementById('step3').style.display = 'none';
+                
+                // Clear form fields
+                document.getElementById('route-name').value = '';
+                document.getElementById('route-date').value = '';
+                document.getElementById('route-technician').value = '';
+                
+                // Clear error messages
+                hideError();
+            });
+
+            // Function to optimize route from UI
+            function optimizeRouteFromUI() {
+                // Check if we have any machines selected
+                const checkedMachines = document.querySelectorAll('#machine-selection-container input[type="checkbox"]:checked');
+                
+                if (checkedMachines.length < 2) {
+                    showError('Please select at least 2 machines to create a route');
+                    return;
+                }
+                
+                hideError();
+                
+                // Collect selected machine IDs
+                selectedMachines = [];
+                checkedMachines.forEach(checkbox => {
+                    selectedMachines.push(parseInt(checkbox.value));
+                });
+                
+                // Show loading state
+                const optimizeBtn = document.getElementById('optimize-btn');
+                const originalBtnText = optimizeBtn.innerHTML;
+                optimizeBtn.disabled = true;
+                optimizeBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Optimizing...';
+                
+                // Call optimize API
+                fetch('/routes/optimize/', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({
+                        machine_ids: selectedMachines
+                    })
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Store optimized data
+                    optimizedRouteData = data;
+                    
+                    // Display results
+                    displayOptimizationResults(data);
+                    
+                    // Show step 3, hide step 2
+                    document.getElementById('step2').style.display = 'none';
+                    document.getElementById('step3').style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error optimizing route:', error);
+                    showError('Failed to optimize route: ' + error.message);
+                })
+                .finally(() => {
+                    // Reset button state
+                    optimizeBtn.disabled = false;
+                    optimizeBtn.innerHTML = originalBtnText;
+                });
+            }
+
+            // Function to save route
+            function saveRouteFromUI() {
+                saveRoute();
+            }
+            
+            // Setup button event listeners with proper error handling
+            function setupModalButtons() {
+                // Step 1 Next button
+                const step1NextBtn = document.getElementById('step1-next-btn');
+                if (step1NextBtn) {
+                    step1NextBtn.addEventListener('click', function() {
+                        try {
+                            const modalBody = document.querySelector('#createRouteModal .modal-body');
+                            const routeNameInput = modalBody.querySelector('#route-name');
+                            const routeDateInput = modalBody.querySelector('#route-date');
+                            const technicianInput = modalBody.querySelector('#route-technician');
+                            
+                            if (!routeNameInput) {
+                                showError('Form error: Route name field not found');
+                                return;
+                            }
+                            
+                            if (!routeDateInput) {
+                                showError('Form error: Date field not found');
+                                return;
+                            }
+                            
+                            if (!technicianInput) {
+                                showError('Form error: Technician field not found');
+                                return;
+                            }
+                            
+                            // Now safely access the values since we've verified the elements exist
+                            const routeName = routeNameInput.value ? routeNameInput.value.trim() : '';
+                            const routeDate = routeDateInput.value || '';
+                            const technicianId = technicianInput.value || '';
+                            
+                            if (!routeName) {
+                                showError('Please enter a route name');
+                                return;
+                            }
+                            if (!routeDate) {
+                                showError('Please select a date');
+                                return;
+                            }
+                            
+                            // Check if the selected date is not in the past
+                            const selectedDate = new Date(routeDate);
+                            selectedDate.setHours(0, 0, 0, 0);
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0);
+                            
+                            if (selectedDate < today) {
+                                showError('Please select a date that is not in the past');
+                                return;
+                            }
+                            
+                            if (!technicianId) {
+                                showError('Please select a technician');
+                                return;
+                            }
+                            
+                            hideError();
+                            document.getElementById('step1').style.display = 'none';
+                            document.getElementById('step2').style.display = 'block';
+                            loadMachines();
+                        } catch (error) {
+                            console.error('Error in step1-next-btn handler:', error);
+                            showError('An error occurred. Please try again.');
+                        }
+                    });
+                }
+                
+                // Step 2 Back button
+                const step2BackBtn = document.getElementById('step2-back-btn');
+                if (step2BackBtn) {
+                    step2BackBtn.addEventListener('click', function() {
+                        document.getElementById('step2').style.display = 'none';
+                        document.getElementById('step1').style.display = 'block';
+                    });
+                }
+                
+                // Optimize button
+                const optimizeBtn = document.getElementById('optimize-btn');
+                if (optimizeBtn) {
+                    optimizeBtn.addEventListener('click', function() {
+                        optimizeRouteFromUI();
+                    });
+                }
+                
+                // Step 3 Back button
+                const step3BackBtn = document.getElementById('step3-back-btn');
+                if (step3BackBtn) {
+                    step3BackBtn.addEventListener('click', function() {
+                        document.getElementById('step3').style.display = 'none';
+                        document.getElementById('step2').style.display = 'block';
+                    });
+                }
+                
+                // Save route button
+                const saveRouteBtn = document.getElementById('save-route-btn');
+                if (saveRouteBtn) {
+                    saveRouteBtn.addEventListener('click', function() {
+                        saveRouteFromUI();
+                    });
+                }
+                
+                // Filter warnings checkbox
+                const filterWarningsCheckbox = document.getElementById('filter-warnings');
+                if (filterWarningsCheckbox) {
+                    filterWarningsCheckbox.addEventListener('change', function() {
+                        loadMachines();
+                    });
+                }
+                
+                // Update routes warnings button
+                const updateRoutesWarningsBtn = document.getElementById('update-routes-warnings-btn');
+                if (updateRoutesWarningsBtn) {
+                    updateRoutesWarningsBtn.addEventListener('click', function() {
+                        const tomorrow = new Date();
+                        tomorrow.setDate(tomorrow.getDate() + 1);
+                        
+                        if (tomorrow.getDay() === 0) {
+                            tomorrow.setDate(tomorrow.getDate() + 1);
+                        } else if (tomorrow.getDay() === 6) {
+                            tomorrow.setDate(tomorrow.getDate() + 2);
+                        }
+                        
+                        const dateInput = document.getElementById('update-routes-date');
+                        dateInput.value = tomorrow.toISOString().split('T')[0];
+                        
+                        const updateRoutesModal = new bootstrap.Modal(document.getElementById('updateRoutesModal'));
+                        updateRoutesModal.show();
+                    });
+                }
+                
+                // Confirm update routes button
+                const confirmUpdateRoutesBtn = document.getElementById('confirm-update-routes-btn');
+                if (confirmUpdateRoutesBtn) {
+                    confirmUpdateRoutesBtn.addEventListener('click', function() {
+                        const dateInput = document.getElementById('update-routes-date');
+                        const spinner = document.getElementById('update-routes-spinner');
+                        const resultDiv = document.getElementById('update-routes-result');
+                        const errorDiv = document.getElementById('update-routes-error');
+                        
+                        resultDiv.style.display = 'none';
+                        errorDiv.style.display = 'none';
+                        
+                        spinner.classList.remove('d-none');
+                        this.disabled = true;
+                        
+                        const data = {};
+                        if (dateInput.value) {
+                            data.date = dateInput.value;
+                        }
+                        
+                        fetch('/routes/refresh/', {
+                            method: 'POST',
+                            headers: getHeaders(),
+                            body: JSON.stringify(data)
+                        })
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error('Server error');
+                            }
+                            return response.json();
+                        })
+                        .then(data => {
+                            resultDiv.innerHTML = `
+                                <strong>Routes updated successfully:</strong><br>
+                                - New routes created: ${data.new_routes_created}<br>
+                                - Existing routes updated: ${data.routes_updated}<br>
+                                - Target date: ${data.target_date}
+                            `;
+                            resultDiv.style.display = 'block';
+                            
+                            setTimeout(() => {
+                                refreshRoutes();
+                            }, 1500);
+                        })
+                        .catch(error => {
+                            console.error('Error updating routes:', error);
+                            errorDiv.textContent = 'Failed to update routes. Please try again.';
+                            errorDiv.style.display = 'block';
+                        })
+                        .finally(() => {
+                            spinner.classList.add('d-none');
+                            this.disabled = false;
+                        });
+                    });
+                }
+            }
+            
+            // Call the setup function when the page loads
+            setupModalButtons();
+        });
+    </script>
+</body>
+</html>

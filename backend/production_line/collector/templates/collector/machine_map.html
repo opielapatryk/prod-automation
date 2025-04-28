@@ -1,0 +1,149 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Production Line Monitoring - Machine Map</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        #map { 
+            height: 600px; 
+            width: 100%;
+        }
+        .status-operational { background-color: #28a745; }
+        .status-warning { background-color: #ffc107; }
+        .status-critical { background-color: #dc3545; }
+        .status-offline { background-color: #6c757d; }
+        .status-maintenance { background-color: #17a2b8; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">Production Line Monitoring</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'dashboard' %}">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{% url 'machine_map' %}">Map View</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'routes' %}">Routes</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/admin/">Admin</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <h1 class="display-4">Machine Location Map</h1>
+                <p class="lead">Geographic view of all machines with status information</p>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div id="map"></div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <h3>Legend</h3>
+                <div class="d-flex flex-wrap">
+                    <div class="me-3 mb-2">
+                        <span class="badge status-operational">&nbsp;&nbsp;&nbsp;</span> Operational
+                    </div>
+                    <div class="me-3 mb-2">
+                        <span class="badge status-warning">&nbsp;&nbsp;&nbsp;</span> Warning
+                    </div>
+                    <div class="me-3 mb-2">
+                        <span class="badge status-critical">&nbsp;&nbsp;&nbsp;</span> Critical
+                    </div>
+                    <div class="me-3 mb-2">
+                        <span class="badge status-offline">&nbsp;&nbsp;&nbsp;</span> Offline
+                    </div>
+                    <div class="me-3 mb-2">
+                        <span class="badge status-maintenance">&nbsp;&nbsp;&nbsp;</span> Maintenance
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize map centered on Poland
+            const map = L.map('map').setView([52.0690, 19.4810], 6);
+            
+            // Add OpenStreetMap tiles
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+            
+            // Define marker colors by status
+            const statusColors = {
+                'operational': '#28a745',
+                'warning': '#ffc107',
+                'critical': '#dc3545',
+                'offline': '#6c757d',
+                'maintenance': '#17a2b8'
+            };
+            
+            // Add markers for each machine with location
+            const machines = [
+                {% for machine in machines %}
+                {% if machine.location %}
+                {
+                    name: "{{ machine.name|escapejs }}",
+                    status: "{{ machine.status|escapejs }}",
+                    model: "{{ machine.model|escapejs }}",
+                    manufacturer: "{{ machine.manufacturer|escapejs }}",
+                    serial_number: "{{ machine.serial_number|escapejs }}",
+                    lat: {{ machine.location.latitude }},
+                    lng: {{ machine.location.longitude }},
+                    address: "{{ machine.location.address|default:'No address'|escapejs }}"
+                }{% if not forloop.last %},{% endif %}
+                {% endif %}
+                {% endfor %}
+            ];
+            
+            machines.forEach(machine => {
+                const customIcon = L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div style="background-color: ${statusColors[machine.status]}; width: 20px; height: 20px; border-radius: 10px; border: 2px solid white;"></div>`,
+                    iconSize: [20, 20],
+                    iconAnchor: [10, 10]
+                });
+                
+                const marker = L.marker([machine.lat, machine.lng], {icon: customIcon}).addTo(map);
+                
+                marker.bindPopup(`
+                    <strong>${machine.name}</strong><br>
+                    Status: ${machine.status}<br>
+                    Model: ${machine.model}<br>
+                    Manufacturer: ${machine.manufacturer}<br>
+                    Serial: ${machine.serial_number}<br>
+                    Address: ${machine.address}<br>
+                    <a href="/admin/collector/machine/?serial_number=${machine.serial_number}" target="_blank">View Details</a>
+                `);
+            });
+        });
+    </script>
+</body>
+</html>
