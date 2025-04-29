@@ -6,6 +6,8 @@
 
 **Automation of the parts replacement process on production floors**
 
+<video src="https://github.com/user-attachments/assets/a14d0ada-d7a4-4d30-aa98-1c6166de2b7f" width="320" height="240" controls></video>
+
 ---
 
 ## 📌 Use Cases – Machine Tracking and Route Planning System
