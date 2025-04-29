@@ -166,16 +166,18 @@
 
 ### Running with Docker
 
-1. **Build and Start Containers**
+1. **Run docker desktop**
+
+2. **Build and Start Containers**
    ```bash
-   docker-compose up --build
+   docker-compose up
    ```
 
-2. **Access the Application**
+3. **Access the Application**
    - Backend API: `http://127.0.0.1:8000/`
    - Admin Panel: `http://127.0.0.1:8000/admin/`
 
-3. **Stop Containers**
+4. **Stop Containers**
    ```bash
    docker-compose down
    ```
