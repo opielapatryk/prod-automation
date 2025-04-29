@@ -10,8 +10,8 @@ services:
       - SECRET_KEY=dev-key-secure-enough-for-local-dev
     depends_on:
       - postgres
-    command: bash -c "chmod +x /app/docker-entrypoint.sh && python manage.py test --failfast && /app/docker-entrypoint.sh"
-  
+    command: /app/docker-entrypoint.sh
+
   postgres:
     image: postgres:15
     environment:

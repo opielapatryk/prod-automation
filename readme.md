@@ -118,3 +118,74 @@
 ![component_diagram](component_diagram.png)
 
 ---
+
+## 🚀 Installation and Running Manual
+
+### Prerequisites
+
+- **Python 3.9+**: Ensure Python is installed on your system.
+- **Docker**: Install Docker to run the application in a containerized environment.
+- **Docker Compose**: Install Docker Compose for managing multi-container applications.
+
+### Installation Steps
+
+1. **Clone the Repository**
+   ```bash
+   git clone https://github.com/opielapatryk/prod-automation
+   cd prod-automation
+   ```
+
+2. **Set Up Python Environment**
+   - Create a virtual environment:
+     ```bash
+     python3 -m venv venv
+     source venv/bin/activate  # On Windows: venv\Scripts\activate
+     ```
+   - Install dependencies:
+     ```bash
+     pip install -r backend/production_line/requirements.txt
+     ```
+
+3. **Set Up Database**
+   - Apply migrations:
+     ```bash
+     python backend/production_line/manage.py migrate
+     ```
+   - (Optional) Load test data:
+     ```bash
+     python backend/production_line/manage.py loaddata <test-data-file>
+     ```
+
+4. **Run the Development Server**
+   ```bash
+   python backend/production_line/manage.py runserver
+   ```
+   Access the application at `http://127.0.0.1:8000/`.
+
+### Running with Docker
+
+1. **Build and Start Containers**
+   ```bash
+   docker-compose up --build
+   ```
+
+2. **Access the Application**
+   - Backend API: `http://127.0.0.1:8000/`
+   - Admin Panel: `http://127.0.0.1:8000/admin/`
+
+3. **Stop Containers**
+   ```bash
+   docker-compose down
+   ```
+
+### Additional Commands
+
+- **Run Tests**
+  ```bash
+  python backend/production_line/manage.py test
+  ```
+
+- **Load Test Data**
+  ```bash
+  python backend/production_line/manage.py load_test_data
+  ```
